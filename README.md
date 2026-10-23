@@ -45,7 +45,7 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 | Tipo de módulo | Cómo se define | Ejemplo |
 |---|---|---|
 | Simple | Solo configuración en la base: campos, monto fijo o fórmula. Sin código. | Tasa de trámite con monto fijo |
-| Con consulta | Configuración más un "resolver" en el back que busca la deuda (por acta, CUIT, etc.). | Multa por apeo ilegal |
+| Con consulta | Configuración más un "resolver" en el back que valida al contribuyente en un registro (por CUIT) o busca la deuda (por acta, CUIT, etc.). | Emisión de certificado (registro de transportistas), multa por apeo ilegal |
 | Complejo | Componente React propio y rutas propias en el back. | Fitosanitarios, con certificados y flujo propio |
 
 Un módulo nuevo no toca el resto del sistema.
@@ -92,7 +92,7 @@ apps/api/src/modules/apeo-ilegal/        apps/web/src/modules/fitosanitarios/
 └─ validar.ts    reglas del módulo
 ```
 
-El módulo no conoce al proveedor de pago ni la autenticación: usa el `core/` (órdenes de pago, comprobantes, `req.contribuyente`).
+El módulo no conoce al proveedor de pago: usa el `core/` (órdenes de pago, comprobantes). La validación del contribuyente la define el propio módulo (ver [Acceso sin login](#-acceso-sin-login)).
 
 > ⚠️ **Estado:** hoy `modules/` está vacío y el front usa el flujo genérico para todos. El contrato exacto (qué exporta `index.ts` y cómo se registra) se define con el primer módulo, multas por apeo ilegal, y se documenta acá. Los nombres de archivo del ejemplo son una propuesta.
 
@@ -112,11 +112,11 @@ Trabajamos **una rama por módulo**, salidas de `develop`:
 
 - `modulos`: slug, nombre, ícono, categoría, orden, activo, tipo, configuración (jsonb)
 - `categorias`: agrupan los botones
-- `ordenes_pago`: la deuda o intención de pago (módulo, contribuyente CUIL/CUIT, monto, estado, referencia al objeto del módulo)
+- `ordenes_pago`: la deuda o intención de pago (módulo, CUIL/CUIT validado, monto, estado, referencia al objeto del módulo)
 - `pagos`: intentos y confirmaciones del proveedor, con payload crudo
 - `comprobantes`
 - `auditoria`
-- `usuarios_admin` y `roles`, con permisos por módulo
+- `usuarios_admin` y `roles`, con permisos por módulo (único login del sistema: el del panel)
 
 Cada módulo suma sus propias tablas con prefijo (`apeo_actas`, `fito_certificados`, …). Una `orden_pago` apunta al registro del módulo con `modulo_slug` + `ref_id`.
 
@@ -124,10 +124,37 @@ Cada módulo suma sus propias tablas con prefijo (`apeo_actas`, `fito_certificad
 
 1. El front nunca habla con la base. Todo pasa por la API, que se conecta por `pg` directo, sin exponer el schema en PostgREST. RLS activado igual, por prevención.
 2. Proveedor de pago como interfaz (`crearPago`, `webhook`, `consultarEstado`). Ningún módulo conoce al proveedor.
-3. Auth como adaptador. Hoy identificación simple (CUIL + datos); después adaptador OIDC para Mi Argentina. Los módulos solo ven `req.contribuyente`.
+3. **Sin login para el público.** Quien entra a pagar no crea cuenta ni inicia sesión. Cuando el trámite lo exige, se identifica con su CUIT/CUIL y el módulo lo valida contra un registro (ver [Acceso sin login](#-acceso-sin-login)). El login existe solo para el panel `/admin`.
 4. Montos y estados se calculan y validan solo en el back. El front nunca manda un monto.
 5. Webhooks idempotentes y conciliación diaria (es plata pública).
 6. Las migraciones quedan como archivos SQL; las corre el dueño del proyecto. No se toca el Supabase desde acá.
+
+## 🔓 Acceso sin login
+
+El público entra directo a `/pagar/:slug`, sin cuenta ni sesión. Según el trámite, el módulo define **qué hay que verificar antes de dejar pagar**:
+
+| Nivel | Qué pasa | Ejemplo |
+|---|---|---|
+| Libre | Se completan los datos y se paga. | Tasa de trámite de monto fijo |
+| Con registro | Se pide el CUIT/CUIL y se busca en un registro. Si está registrado, puede pagar; si no, se le indica cómo registrarse. | Emisión de certificado: el transportista tiene que figurar en el Registro de Transportistas |
+| Con deuda | Se busca por acta, CUIT u otro dato y se muestra lo que debe. | Multa por apeo ilegal |
+
+**Flujo con registro** (ej. certificado de transportista):
+
+1. El usuario ingresa su CUIT.
+2. El back valida el formato (dígito verificador) y busca el CUIT en el registro del módulo.
+3. Si aparece, se muestran los datos que devuelve el registro (razón social, estado) para que confirme que es él, y avanza a los datos del trámite y al pago.
+4. Si no aparece o está dado de baja/suspendido, no se habilita el pago y se explica qué hacer.
+
+Consideraciones:
+
+- **Qué tabla es el registro.** Cada módulo declara de dónde sale su registro: una tabla propia del módulo (`transportistas`, importada o mantenida por el área) o una consulta a otro sistema (por ejemplo Ecodatos). Es un `resolver` más del back.
+- **Sin sesión, sin datos sensibles.** Saber un CUIT no prueba que uno sea esa persona. Por eso, antes del pago, la consulta devuelve solo lo mínimo (razón social, estado), nunca domicilio, teléfono, deudas ni documentos. El comprobante y los certificados emitidos se entregan con un código de verificación, no por una lista pública.
+- **Anti-abuso.** Límite de consultas por IP/CUIT y CAPTCHA en la búsqueda, para que no se use para recorrer el registro.
+- **El pago no se confía al front.** El back guarda en la `orden_pago` el CUIT validado y recalcula todo al crear el pago y al recibir el webhook.
+- **Cualquiera puede pagar por un tercero.** Es válido y deseable (un contador pagando por un cliente); lo que se controla es que el CUIT esté en el registro, no quién paga.
+
+> ❓ A definir con el área: ¿el registro ya existe digital y de dónde se puede leer? ¿Hay trámites que además exijan estar al día con pagos anteriores?
 
 ## 💰 Proveedor de pago: MacroClick
 
@@ -171,7 +198,8 @@ npm run dev:api          # API (no hace falta para el mock)
 - Lista real de trámites y pagos del ministerio (se carga como filas de `modulos` y `categorias`, o en el mock).
 - `ordenes_pago` y `pagos`, con el circuito completo usando el proveedor mock, empezando por un módulo (multas por apeo ilegal) para definir el contrato que seguirán los demás.
 - Panel `/admin`.
-- Integración con Mi Argentina.
+- Definir con cada área qué registro valida cada trámite (empezando por el Registro de Transportistas) y de dónde se lee.
+- Contrato del resolver de registro: búsqueda por CUIT, validación de formato, datos mínimos que devuelve, límite de consultas y CAPTCHA.
 
 ## 📋 Herramienta de relevamiento (local)
 
