@@ -1,0 +1,62 @@
+:root {
+  --bg: #f5f6f8; --fg: #1c2127; --muted: #5f6b7a; --primary: #2b4a6f; --primary-dark: #1f3a5a;
+  --card: #fff; --border: #dde1e7;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; line-height: 1.4; }
+.container { width: 100%; margin: 0 auto; padding: 24px clamp(16px, 4vw, 64px) 48px; }
+.hero { background: var(--primary); color: #fff; padding: 14px clamp(16px, 4vw, 64px); }
+.hero { text-align: center; }
+.hero h1 { margin: 0; font-size: 1.4rem; }
+.hero p { margin: 2px 0 10px; font-size: .9rem; opacity: .9; }
+.hero input { display: block; width: 100%; max-width: 520px; margin: 0 auto; padding: 8px 14px; border-radius: 8px; border: 0; font-size: 16px; }
+h2 { margin: 32px 0 12px; font-size: 1.15rem; text-align: center; }
+.cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 32px; align-items: start; }
+.cols h2 { margin-top: 16px; }
+.grid { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.grid > .card { width: 100%; max-width: 320px; }
+@media (max-width: 900px) { .cols { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .cols { grid-template-columns: 1fr; } }
+/* Celular: lista de una columna, ícono a la izquierda */
+@media (max-width: 560px) {
+  .grid { gap: 10px; }
+  .grid > .card { max-width: none; }
+  .card { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; align-items: center; text-align: left; justify-items: start; padding: 14px; min-height: 64px; }
+  .card svg { grid-row: span 2; }
+  .hero input { max-width: none; }
+}
+.card { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; justify-content: center; padding: 18px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; color: inherit; text-decoration: none; transition: border-color .15s, transform .15s; }
+.card:hover, .card:focus-visible { border-color: var(--primary); transform: translateY(-2px); }
+.card svg { color: var(--primary); }
+.card span { color: var(--muted); font-size: .9rem; }
+.msg { color: var(--muted); }
+.msg.error { color: #c0392b; }
+a { color: var(--primary-dark); }
+
+.container.narrow { max-width: 640px; }
+.mod-head { display: flex; gap: 14px; align-items: center; margin: 16px 0; }
+.mod-head h1 { margin: 0; font-size: 1.4rem; }
+.mod-head p { margin: 2px 0 0; }
+.mod-head svg { color: var(--primary); flex: none; }
+.steps { display: flex; gap: 6px; list-style: none; padding: 0; margin: 0 0 16px; font-size: .8rem; }
+.steps li { flex: 1; text-align: center; padding: 6px 4px; border-bottom: 3px solid var(--border); color: var(--muted); }
+.steps li.on { border-color: var(--primary); color: var(--fg); font-weight: 600; }
+.steps li.done { border-color: var(--primary); }
+.panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.panel label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; font-size: .9rem; font-weight: 500; }
+.panel input, .panel select { padding: 10px 12px; font-size: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.btn { display: inline-block; padding: 11px 18px; border: 1px solid var(--primary); background: var(--primary); color: #fff; border-radius: 8px; font-size: 1rem; cursor: pointer; text-decoration: none; text-align: center; }
+.btn.ghost { background: transparent; color: var(--primary-dark); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.resumen { margin: 0; }
+.resumen div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.resumen dt { color: var(--muted); } .resumen dd { margin: 0; font-weight: 500; text-align: right; }
+.resumen .total { font-size: 1.15rem; border: 0; } .resumen .total dd { font-weight: 700; }
+.center { text-align: center; } .small { font-size: .8rem; text-align: center; margin-top: 16px; }
+.ok h2 { margin-top: 0; }
+
+/* Celular: se repite al final para ganar a la regla base de .card */
+@media (max-width: 560px) {
+  .card { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; align-items: center; text-align: left; justify-items: start; padding: 14px; min-height: 64px; }
+  .card svg { grid-row: span 2; }
+}

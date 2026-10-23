@@ -1,0 +1,11 @@
+{
+  "name": "botonera-pagos",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:api": "npm run dev -w @botonera/api",
+    "dev:relevamiento": "npm run dev -w @botonera/relevamiento",
+    "dev:web": "npm run dev -w @botonera/web",
+    "build": "npm run build -w @botonera/web && npm run build -w @botonera/api"
+  }
+}
