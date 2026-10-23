@@ -129,6 +129,49 @@ Cada módulo suma sus propias tablas con prefijo (`apeo_actas`, `fito_certificad
 5. Webhooks idempotentes y conciliación diaria (es plata pública).
 6. Las migraciones quedan como archivos SQL; las corre el dueño del proyecto. No se toca el Supabase desde acá.
 
+## 🧭 Cómo funciona
+
+**No hay logueo.** Nadie crea cuenta ni inicia sesión para pagar. El usuario busca su trámite, completa lo que ese trámite pide y, si cumple los requisitos, paga. El único login del sistema es el del panel `/admin`.
+
+### Recorrido del usuario
+
+1. **Busca su trámite.** En la home, con el buscador o navegando por categorías (Forestal, Fauna, Trámites y tasas, etc.), y entra al botón correspondiente (`/pagar/:slug`).
+2. **Ve qué necesita.** La pantalla del trámite muestra qué datos pide y, si hay requisitos previos (estar inscripto en un registro, tener un acta, etc.), lo aclara antes de empezar.
+3. **Completa los datos requeridos.** Cada trámite define sus propios campos (CUIT/CUIL, nº de acta, expediente, datos del titular, etc.).
+4. **El back valida.** Se controla el formato de los datos y, **solo cuando el trámite lo exige**, se verifica que existan (y estén en condición) en la base.
+5. **Si cumple, se habilita el pago.** Se muestra el resumen con el monto calculado por el back y se pasa al proveedor de pago.
+6. **Pago y comprobante.** Al confirmarse el pago (webhook del proveedor) se emite el comprobante con un código de verificación.
+7. **Si no cumple, no se paga.** Se le explica el motivo (no figura, está dado de baja, no tiene deuda, etc.) y qué hacer para resolverlo.
+
+### Qué define cada trámite
+
+Cada trámite (módulo) declara tres cosas:
+
+| Definición | Qué es | Ejemplo |
+|---|---|---|
+| **Datos requeridos** | Los campos que hay que completar para poder lanzar el pago. | CUIT, nº de acta |
+| **Requisito en la base** | Si hace falta que esos datos existan en la base (y en qué tabla/registro), o si alcanza con completarlos. | El CUIT tiene que estar en el Registro de Transportistas |
+| **Cálculo del monto** | Monto fijo, fórmula sobre los datos, o monto que sale de la deuda encontrada. | Tasa fija; multa según el acta |
+
+Con eso, cada trámite cae en uno de estos casos:
+
+| Caso | Se pide | ¿Consulta a la base? | Se habilita el pago si… |
+|---|---|---|---|
+| **Libre** | Datos del formulario | No | Los datos están completos y con formato válido. |
+| **Con registro** | CUIT/CUIL (y lo que defina el módulo) | Sí: busca en el registro | El CUIT figura en el registro y está activo. |
+| **Con deuda** | Acta, CUIT u otro identificador | Sí: busca la deuda | Existe una deuda pendiente. El monto es el de la deuda. |
+
+### Reglas que no cambian
+
+- **La decisión la toma el back.** El front solo muestra y recolecta; nunca decide si se puede pagar ni manda un monto.
+- **Los datos se consultan solo si el trámite lo necesita.** Un trámite libre no toca la base.
+- **Antes de pagar se muestra lo mínimo.** Sin sesión, saber un CUIT no prueba identidad: la consulta devuelve solo lo necesario para que la persona confirme (razón social, estado), nunca datos sensibles.
+- **Se revalida al pagar.** Al crear la orden de pago y al recibir el webhook, el back vuelve a comprobar los requisitos y recalcula el monto.
+- **Cualquiera puede pagar por un tercero.** Se controla que el dato exista y esté habilitado, no quién paga.
+- **Sin requisito cumplido no hay `orden_pago`.** La orden solo se crea cuando el trámite pasó todas sus validaciones, y guarda los datos validados.
+
+El detalle de los niveles de validación y sus resguardos (anti-abuso, datos mínimos) está en [Acceso sin login](#-acceso-sin-login).
+
 ## 🔓 Acceso sin login
 
 El público entra directo a `/pagar/:slug`, sin cuenta ni sesión. Según el trámite, el módulo define **qué hay que verificar antes de dejar pagar**:
