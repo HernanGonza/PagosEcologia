@@ -101,12 +101,11 @@ El módulo no conoce al proveedor de pago: usa el `core/` (órdenes de pago, com
 Trabajamos **una rama por módulo**, salidas de `develop`:
 
 - Nombre: `modulo/<slug>` (por ejemplo `modulo/multas-apeo-ilegal`).
-- Cada módulo se desarrolla en su rama (migración, back y front si corresponde) y vuelve a `develop` **siempre con un pull request (PR)**, nunca con push directo.
-- Todo PR lo revisa al menos otra persona antes del merge. Esto vale más a medida que se sumen desarrolladores al proyecto.
+- Cada módulo se desarrolla en su rama (migración, back y front si corresponde) y se mergea a `develop` cuando está terminado.
 - Cambios al núcleo (`core/`, `packages/shared`, este README) van en ramas aparte (`core/<tema>`), para que no se mezclen con un módulo.
-- Antes de empezar una rama y antes de abrir el PR, traer lo último de `develop`.
+- Antes de empezar una rama y antes de mergear a `develop`, traer lo último de `develop`.
 - `develop` es la rama de trabajo: ahí se junta todo lo que se va terminando.
-- `main` es la rama de **despliegue**. Cuando `develop` está estable, se pasa a `main` (PR de `develop` a `main`) y de ahí sale lo que se publica. No se trabaja directo en `main`.
+- `main` es la rama de **despliegue**. Cuando `develop` está estable, se pasa a `main` y de ahí sale lo que se publica. No se trabaja directo en `main`.
 
 ### 🗄️ Schema `recaudaciones` (núcleo)
 
