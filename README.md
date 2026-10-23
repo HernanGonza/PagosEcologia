@@ -1,6 +1,32 @@
-# Botonera de pagos — Plan
+# Botonera de pagos
+
+> Este README es el documento vivo del proyecto (plan, arquitectura y estado). Se actualiza junto con el código.
 
 Botonera para que el público pague desde la página del Ministerio de Ecología todo lo que el ministerio cobra. Incluye backend, panel de administración y front.
+
+## Tecnologías
+
+| Capa | Tecnología |
+|---|---|
+| Monorepo | npm workspaces |
+| Lenguaje | TypeScript (en todo el repo) |
+| Front (`apps/web`) | React 18, Vite, React Router 6, lucide-react (íconos) |
+| Back (`apps/api`) | Node.js, Express 5, `pg` (conexión directa a Postgres), `cors` |
+| Código compartido (`packages/shared`) | Tipos TypeScript compartidos entre front y back |
+| Base de datos | PostgreSQL, en el Supabase self-hosted de Ecodatos |
+| Migraciones | Archivos SQL en `db/migrations/` |
+| Pagos | MacroClick, detrás de una interfaz de proveedor (hoy hay un `mock`) |
+| Relevamiento (`apps/relevamiento`) | Express + SQLite local + React (herramienta aparte, solo local) |
+| Desarrollo | `tsx` (API con recarga automática), Vite (front) |
+
+## Conexión a Supabase (Ecodatos)
+
+La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el otro sistema del ministerio. Usamos un schema propio (`recaudaciones`) dentro de esa instancia, separado de los datos de Ecodatos.
+
+- La API se conecta directo a Postgres con `pg`, usando la variable `DATABASE_URL` del `.env`.
+- El front nunca habla con Supabase: todo pasa por la API. El schema no se expone en PostgREST y tiene RLS activado por prevención.
+- Las credenciales no están en el repo. Cada quien arma su `.env` a partir de `.env.example` y las pide al dueño del proyecto.
+- Las migraciones de `db/migrations/` las corre el dueño del proyecto sobre esa instancia; desde este repo no se modifica la base.
 
 ## Arquitectura
 
@@ -81,7 +107,12 @@ Es un mock del front, sin base ni API.
 
 ### Cómo correrlo
 
-Desde la raíz: `npm run dev:web` (front) y `npm run dev:api` (API, no hace falta para el mock).
+```bash
+npm install
+cp .env.example .env     # completar DATABASE_URL (solo si se usa la API)
+npm run dev:web          # front
+npm run dev:api          # API (no hace falta para el mock)
+```
 
 ## Pendiente
 
