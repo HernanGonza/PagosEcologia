@@ -113,7 +113,9 @@ Trabajamos **una rama por módulo**, salidas de `develop`:
 - `categorias`: agrupan los botones
 - `ordenes_pago`: la deuda o intención de pago (módulo, CUIL/CUIT validado, monto, estado, referencia al objeto del módulo)
 - `pagos`: intentos y confirmaciones del proveedor, con payload crudo
+- `tarifas`: valores de cada trámite con vigencia (versionadas); la orden guarda la versión usada
 - `comprobantes`
+- `conciliaciones`: cruce de pagos con MacroClick y banco, con diferencias y notas
 - `auditoria`
 - `usuarios_admin` y `roles`, con permisos por módulo (único login del sistema: el del panel)
 
@@ -163,11 +165,39 @@ Con eso, cada trámite cae en uno de estos casos:
 ### Reglas que no cambian
 
 - **La decisión la toma el back.** El front solo muestra y recolecta; nunca decide si se puede pagar ni manda un monto.
+- **Todo trámite lleva CAPTCHA**, también los libres. El back lo verifica antes de validar nada.
 - **Los datos se consultan solo si el trámite lo necesita.** Un trámite libre no toca la base.
 - **Antes de pagar se muestra lo mínimo.** Sin sesión, saber un CUIT no prueba identidad: la consulta devuelve solo lo necesario para que la persona confirme (razón social, estado), nunca datos sensibles.
 - **Se revalida al pagar.** Al crear la orden de pago y al recibir el webhook, el back vuelve a comprobar los requisitos y recalcula el monto.
 - **Cualquiera puede pagar por un tercero.** Se controla que el dato exista y esté habilitado, no quién paga.
 - **Sin requisito cumplido no hay `orden_pago`.** La orden solo se crea cuando el trámite pasó todas sus validaciones, y guarda los datos validados.
+
+### 📜 Contrato de un trámite
+
+Los tipos viven en `packages/shared/src/contrato.ts`. La config de cada trámite se guarda en `modulos.config` (jsonb):
+
+```ts
+interface ConfigModulo {
+  campos: Campo[];        // datos requeridos
+  requisito: Requisito;   // qué tiene que existir en la base
+  monto: CalculoMonto;    // cómo se calcula el monto
+}
+```
+
+| Tipo | Variantes |
+|---|---|
+| `Requisito` | `ninguno` (libre) · `registro` (registro, campo de búsqueda, estados que habilitan) · `deuda` (fuente, campos que la identifican) |
+| `CalculoMonto` | `fijo` · `formula` (base + valor de campo × factor) · `escala` (importe según el tramo del campo) · `deuda` (el monto de la deuda encontrada). Ninguno lleva números: cada `concepto` apunta a una `Tarifa`. |
+| `Tarifa` | Valor (importe o tramos) de un concepto, con `vigente_desde`. Se edita desde el panel; rige la última vigente a la fecha del cálculo y las anteriores se conservan. |
+
+**Validación.** `POST /api/modulos/:slug/validar` recibe `{ datos, captcha }`. **El CAPTCHA es obligatorio en todos los trámites**, también los libres; el back lo verifica antes de cualquier otra cosa:
+
+- Si cumple: `{ ok: true, monto, tarifas, datosMinimos?, validacionId }`. El monto lo calcula el back; `tarifas` son las versiones usadas, que se guardan en la orden.
+- Si no: `{ ok: false, motivo, mensaje, errores? }`. Motivos: `datos_invalidos`, `no_registrado`, `no_habilitado`, `sin_deuda`, `captcha_invalido`, `limite_consultas`.
+
+**Resolver.** Los trámites con `registro` o `deuda` implementan `Resolver.consultar(datos)` en `apps/api/src/modules/<slug>/resolver.ts`. Devuelve si encontró algo y los `DatosMinimos` (titular, estado, concepto), nunca domicilio ni teléfono. Para `deuda`, además el monto.
+
+> ⚠️ Es la primera versión: se ajusta con el primer módulo real (multas por apeo ilegal). Todavía no está conectado al mock ni a la API.
 
 El detalle de los niveles de validación y sus resguardos (anti-abuso, datos mínimos) está en [Acceso sin login](#-acceso-sin-login).
 
@@ -192,11 +222,50 @@ Consideraciones:
 
 - **Qué tabla es el registro.** Cada módulo declara de dónde sale su registro: una tabla propia del módulo (`transportistas`, importada o mantenida por el área) o una consulta a otro sistema (por ejemplo Ecodatos). Es un `resolver` más del back.
 - **Sin sesión, sin datos sensibles.** Saber un CUIT no prueba que uno sea esa persona. Por eso, antes del pago, la consulta devuelve solo lo mínimo (razón social, estado), nunca domicilio, teléfono, deudas ni documentos. El comprobante y los certificados emitidos se entregan con un código de verificación, no por una lista pública.
-- **Anti-abuso.** Límite de consultas por IP/CUIT y CAPTCHA en la búsqueda, para que no se use para recorrer el registro.
+- **Anti-abuso.** CAPTCHA en todos los trámites (verificado en el back) y límite de consultas por IP/CUIT, para que no se use para recorrer el registro.
 - **El pago no se confía al front.** El back guarda en la `orden_pago` el CUIT validado y recalcula todo al crear el pago y al recibir el webhook.
 - **Cualquiera puede pagar por un tercero.** Es válido y deseable (un contador pagando por un cliente); lo que se controla es que el CUIT esté en el registro, no quién paga.
 
 > ❓ A definir con el área: ¿el registro ya existe digital y de dónde se puede leer? ¿Hay trámites que además exijan estar al día con pagos anteriores?
+
+## 🛠️ Panel de administración (`/admin`)
+
+Es para la gente de Recaudaciones. Tiene login (único del sistema), roles y permisos por módulo. Tiene dos partes.
+
+### 1. Configuración de cada trámite
+
+Cada trámite tiene su pantalla de configuración, para que Recaudaciones cambie los valores sin tocar código ni pedir una migración:
+
+- **Montos y tarifas:** importe fijo, valores de la fórmula (base, factores por unidad), escalas, recargos, intereses y descuentos.
+- **Vigencias:** cada cambio de monto tiene fecha de inicio. Los valores anteriores se conservan (tarifas versionadas), no se pisan.
+- **Habilitar o deshabilitar** el trámite y editar su texto y ayudas.
+- **Qué NO se edita desde el panel:** el tipo de requisito (`ninguno` / `registro` / `deuda`) y los resolvers. Eso es código y cambia con una migración.
+
+Reglas:
+
+- Los números salen de la base, nunca están escritos en el código: `CalculoMonto` guarda una referencia a la tarifa vigente.
+- La `orden_pago` **guarda el monto y la versión de tarifa con que se creó**. Un cambio de tarifa no altera órdenes ya generadas.
+- Todo cambio queda en `auditoria` (quién, cuándo, valor anterior y nuevo).
+- Permisos por módulo: cada persona edita solo los trámites de su área.
+
+### 2. Panel general de Recaudaciones
+
+- **Conciliación:** cruzar los pagos registrados con lo que informa MacroClick y con lo que se acredita en el banco. Marca pagos conciliados, pendientes y con diferencias (pagados sin orden, órdenes sin pago, montos distintos) y permite resolverlos con nota. Se apoya en la conciliación diaria automática.
+- **Listado de pagos y órdenes:** filtros por trámite, categoría, fecha, estado, monto y CUIT; búsqueda por comprobante; detalle de cada pago con su historial.
+- **Estadísticas y gráficos:** recaudación por período, por trámite y por categoría; cantidad de pagos; ticket promedio; comparación contra períodos anteriores; trámites más usados; pagos rechazados o abandonados.
+- **Reportes:** exportables a Excel/CSV y PDF, con los mismos filtros (por ejemplo, el reporte diario para Tesorería). El formato lo define Contaduría.
+- **Reimpresión de comprobantes** y consulta de auditoría.
+
+### Roles
+
+| Rol | Puede |
+|---|---|
+| Administrador | Todo, incluida la gestión de usuarios. |
+| Recaudaciones | Ver todo, conciliar, emitir reportes y editar tarifas. |
+| Responsable de área | Ver y editar los trámites de su área. |
+| Auditor / consulta | Solo lectura y reportes. |
+
+> ❓ A definir con Recaudaciones: formato de los reportes, cómo concilian hoy, si hace falta aprobación de un segundo usuario para cambiar un monto, y qué indicadores quieren ver primero.
 
 ## 💰 Proveedor de pago: MacroClick
 
@@ -239,7 +308,7 @@ npm run dev:api          # API (no hace falta para el mock)
 - Manual técnico y credenciales de MacroClick.
 - Lista real de trámites y pagos del ministerio (se carga como filas de `modulos` y `categorias`, o en el mock).
 - `ordenes_pago` y `pagos`, con el circuito completo usando el proveedor mock, empezando por un módulo (multas por apeo ilegal) para definir el contrato que seguirán los demás.
-- Panel `/admin`.
+- Panel `/admin`: configuración de trámites (tarifas versionadas) y panel de Recaudaciones (conciliación, estadísticas, filtros, reportes). Ver la sección «Panel de administración».
 - Definir con cada área qué registro valida cada trámite (empezando por el Registro de Transportistas) y de dónde se lee.
 - Contrato del resolver de registro: búsqueda por CUIT, validación de formato, datos mínimos que devuelve, límite de consultas y CAPTCHA.
 

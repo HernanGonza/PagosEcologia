@@ -67,12 +67,14 @@ export const SECCIONES: { kind: Kind; titulo: string; ayuda: string; agregar: st
   },
   {
     kind: 'campo', titulo: 'Datos que se piden en el formulario web', agregar: 'Agregar dato',
-    ayuda: 'Los campos que la persona tendría que completar para pagar.',
+    ayuda: 'Los campos que la persona tendría que completar para pagar. Marcá cuáles se buscan en la base: si ese dato no existe, no se deja pagar.',
     campos: [
       { k: 'nombre', label: 'Dato' },
       { k: 'tipo', label: 'Tipo', tipo: 'lista', opciones: ['Texto', 'Número', 'Fecha', 'CUIL / CUIT', 'DNI', 'Lista de opciones', 'Archivo adjunto', 'Otro'] },
       { k: 'obligatorio', label: 'Obligatorio', tipo: 'lista', opciones: ['Sí', 'No'] },
-      { k: 'validacion', label: 'Validación / de dónde sale' },
+      { k: 'enBase', label: '¿Tiene que existir en la base para poder pagar?', tipo: 'lista', opciones: ['No, solo se completa', 'Sí, en un registro', 'Sí, es la deuda a pagar'] },
+      { k: 'fuente', label: 'Registro o sistema donde se busca (si aplica)' },
+      { k: 'validacion', label: 'Validación de formato / de dónde sale' },
       { k: 'notas', label: 'Notas', tipo: 'largo' },
     ],
   },
