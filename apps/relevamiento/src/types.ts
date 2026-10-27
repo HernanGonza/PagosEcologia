@@ -18,6 +18,7 @@ export type Proceso = {
   notas?: string;
   actualizado?: string;
   items: Record<Kind, Record<string, string>[]>;
+  guia?: { clave: string; hecho: number; nota: string }[];
   cuenta?: Partial<Record<Kind, number>>;
 };
 

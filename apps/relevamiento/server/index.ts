@@ -17,11 +17,12 @@ function completo(id: number) {
   const items = db.prepare('SELECT * FROM items WHERE proceso_id = ? ORDER BY orden').all(id) as ItemRow[];
   const out: Record<string, unknown[]> = Object.fromEntries(KINDS.map((k) => [k, []]));
   for (const it of items) out[it.kind]?.push({ ...JSON.parse(it.data) });
-  return { ...proceso(r), items: out };
+  const guia = db.prepare('SELECT clave, hecho, nota FROM respuestas_guia_proceso WHERE proceso_id = ? ORDER BY clave').all(id);
+  return { ...proceso(r), items: out, guia };
 }
 
 function guardar(id: number, body: any) {
-  const { titulo = '', items = {}, id: _i, creado: _c, actualizado: _a, ...resto } = body;
+  const { titulo = '', items = {}, guia: _g, id: _i, creado: _c, actualizado: _a, ...resto } = body;
   db.exec('BEGIN');
   try {
     db.prepare("UPDATE procesos SET titulo = ?, data = ?, actualizado = datetime('now','localtime') WHERE id = ?")
@@ -38,6 +39,8 @@ function guardar(id: number, body: any) {
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+app.get('/api/capacidades', (_req, res) => res.json({ guiaPorProceso: true }));
 
 app.get('/api/procesos', (_req, res) => {
   const rows = db.prepare('SELECT * FROM procesos ORDER BY actualizado DESC').all() as Row[];
@@ -67,17 +70,33 @@ app.delete('/api/procesos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/checklist', (_req, res) => res.json(db.prepare('SELECT * FROM checklist').all()));
+app.get('/api/checklist', (_req, res) => {
+  const globales = db.prepare('SELECT clave, hecho, nota, NULL AS proceso_id FROM checklist').all();
+  const porProceso = db.prepare('SELECT clave, hecho, nota, proceso_id FROM respuestas_guia_proceso').all();
+  res.json([...globales, ...porProceso]);
+});
 app.put('/api/checklist/:clave', (req, res) => {
-  db.prepare('INSERT INTO checklist (clave, hecho, nota) VALUES (?,?,?) ON CONFLICT(clave) DO UPDATE SET hecho = excluded.hecho, nota = excluded.nota')
-    .run(req.params.clave, req.body.hecho ? 1 : 0, req.body.nota ?? '');
+  if (req.body.proceso_id != null) {
+    const procesoId = Number(req.body.proceso_id);
+    if (!Number.isInteger(procesoId) || !completo(procesoId)) return void res.status(404).json({ error: 'no existe el proceso' });
+    db.prepare(`INSERT INTO respuestas_guia_proceso (clave, proceso_id, hecho, nota) VALUES (?,?,?,?)
+      ON CONFLICT(clave, proceso_id) DO UPDATE SET hecho = excluded.hecho, nota = excluded.nota`)
+      .run(req.params.clave, procesoId, req.body.hecho ? 1 : 0, req.body.nota ?? '');
+  } else {
+    db.prepare('INSERT INTO checklist (clave, hecho, nota) VALUES (?,?,?) ON CONFLICT(clave) DO UPDATE SET hecho = excluded.hecho, nota = excluded.nota')
+      .run(req.params.clave, req.body.hecho ? 1 : 0, req.body.nota ?? '');
+  }
   res.json({ ok: true });
 });
 
 app.get('/api/export.json', (_req, res) => {
   const ids = db.prepare('SELECT id FROM procesos ORDER BY id').all() as { id: number }[];
   res.setHeader('Content-Disposition', 'attachment; filename="relevamiento.json"');
-  res.json({ procesos: ids.map((r) => completo(r.id)), checklist: db.prepare('SELECT * FROM checklist').all() });
+  res.json({
+    procesos: ids.map((r) => completo(r.id)),
+    checklist: db.prepare('SELECT * FROM checklist').all(),
+    respuestas_guia_proceso: db.prepare('SELECT * FROM respuestas_guia_proceso ORDER BY proceso_id, clave').all(),
+  });
 });
 
 const vite = await createVite({ root, server: { middlewareMode: true }, appType: 'spa' });

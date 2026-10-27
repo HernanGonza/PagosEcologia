@@ -28,4 +28,11 @@ db.exec(`
     hecho INTEGER NOT NULL DEFAULT 0,
     nota TEXT NOT NULL DEFAULT ''
   );
+  CREATE TABLE IF NOT EXISTS respuestas_guia_proceso (
+    clave TEXT NOT NULL,
+    proceso_id INTEGER NOT NULL REFERENCES procesos(id) ON DELETE CASCADE,
+    hecho INTEGER NOT NULL DEFAULT 0,
+    nota TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (clave, proceso_id)
+  );
 `);
