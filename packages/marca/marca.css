@@ -1,0 +1,163 @@
+/*
+ * Marca del Ministerio de Ecología y RNR de Misiones (Brandbook 2024).
+ * Paleta: escala de verdes y beige de la marca Misiones + rosado de la flor del Lapacho.
+ * Tipografía institucional: Oak Sans. Mismos valores que mapa-pronostico (theme.css).
+ * Solo modo claro. Lo importan todas las apps; después de los tokens de shadcn.
+ */
+
+@font-face {
+  font-family: "Oak Sans";
+  src: url("./fuentes/OakSans-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oak Sans";
+  src: url("./fuentes/OakSans-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oak Sans";
+  src: url("./fuentes/OakSans-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oak Sans";
+  src: url("./fuentes/OakSans-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Oak Sans";
+  src: url("./fuentes/OakSans-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  /* --- Verdes (#3E6C51 es el verde oficial del manual) --- */
+  --verde-900: #1b3325;
+  --verde-800: #234131;
+  --verde-700: #2f5540;
+  --verde-600: #3e6c51;
+  --verde-500: #4f7d61;
+  --oliva-600: #5e793e;
+  --oliva-400: #9ca867;
+  --sage-300: #b8c38a;
+  --sage-200: #cad4a0;
+
+  /* --- Crema / beige --- */
+  --crema: #faf4eb;
+  --crema-200: #f1e9d8;
+  --crema-300: #e6dcc5;
+
+  /* --- Rosado Lapacho (acento; gradación #F5A5BF → #C9346C) --- */
+  --rosa-700: #a72858;
+  --rosa-600: #c9346c;
+  --rosa-400: #e87fa5;
+  --rosa-300: #f5a5bf;
+
+  /* --- Secundarios de la paleta Misiones --- */
+  --naranja-500: #e18a40;
+  --amarillo-400: #efd44e;
+  --azul-600: #3371c6;
+
+  --texto: #21130d;
+  --texto-suave: #6b6152;
+  --borde: #e4dac6;
+  --ok: #2f7d4f;
+  --peligro: #b32d3a;
+  --aviso: #9a6a12;
+
+  --font-marca: "Oak Sans", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* --- Tokens de shadcn / Watermelon --- */
+  --background: var(--crema);
+  --foreground: var(--texto);
+  --card: #ffffff;
+  --card-foreground: var(--texto);
+  --popover: #ffffff;
+  --popover-foreground: var(--texto);
+  --primary: var(--verde-600);
+  --primary-foreground: #ffffff;
+  --secondary: var(--crema-200);
+  --secondary-foreground: var(--verde-800);
+  --muted: #f6f1e6;
+  --muted-foreground: var(--texto-suave);
+  --accent: var(--crema-200);
+  --accent-foreground: var(--verde-800);
+  --destructive: var(--peligro);
+  --border: var(--borde);
+  --input: var(--borde);
+  --ring: var(--rosa-600);
+  --chart-1: var(--verde-600);
+  --chart-2: var(--rosa-600);
+  --chart-3: var(--naranja-500);
+  --chart-4: var(--ok);
+  --chart-5: var(--azul-600);
+  --radius: 0.75rem;
+  --sidebar: var(--crema-200);
+  --sidebar-foreground: var(--verde-800);
+  --sidebar-primary: var(--verde-600);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: var(--verde-800);
+  --sidebar-border: var(--crema-300);
+  --sidebar-ring: var(--rosa-600);
+}
+
+/* El bloque capitalio-dashboard define sus propios tokens en .capitalio-dashboard: se pisan acá. */
+:root .capitalio-dashboard,
+:root body:has(.capitalio-dashboard) [data-slot="sidebar"][data-mobile="true"] {
+  --background: var(--crema);
+  --foreground: var(--texto);
+  --card: #ffffff;
+  --card-foreground: var(--texto);
+  --card-hover: #fbf8f2;
+  --popover: #ffffff;
+  --popover-foreground: var(--texto);
+  --primary: var(--verde-600);
+  --primary-foreground: #ffffff;
+  --secondary: var(--crema-200);
+  --secondary-foreground: var(--verde-800);
+  --muted: #f6f1e6;
+  --muted-foreground: var(--texto-suave);
+  --accent: var(--crema-200);
+  --accent-foreground: var(--verde-800);
+  --destructive: var(--peligro);
+  --border: var(--borde);
+  --input: var(--borde);
+  --ring: var(--rosa-600);
+  --chart-1: var(--verde-600);
+  --chart-2: var(--rosa-600);
+  --chart-3: var(--naranja-500);
+  --chart-4: var(--ok);
+  --chart-5: var(--azul-600);
+  --dashboard-icon-bg: linear-gradient(160deg, var(--verde-500), var(--verde-800));
+  --dashboard-icon-shadow: 0 1px 0 rgb(27 51 37 / 25%);
+  --sidebar: var(--crema-200);
+  --sidebar-foreground: var(--verde-800);
+  --sidebar-primary: var(--verde-600);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: var(--verde-800);
+  --sidebar-border: var(--crema-300);
+  --sidebar-ring: var(--rosa-600);
+  --sidebar-muted: var(--texto-suave);
+  --sidebar-muted-foreground: var(--texto-suave);
+}
+
+/* Ítem activo de la barra lateral: tarjeta blanca con el verde de la marca. */
+:root .capitalio-dashboard .active-sidebar-item {
+  background: #ffffff !important;
+  color: var(--verde-700) !important;
+}
+:root .capitalio-dashboard .active-sidebar-item::before {
+  background: linear-gradient(90deg, var(--crema-300), var(--rosa-300) 50%, var(--crema-300));
+}
+
+html {
+  font-family: var(--font-marca);
+}

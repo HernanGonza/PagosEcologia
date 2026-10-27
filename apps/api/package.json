@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/server.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "migrate": "tsx --env-file=../../.env scripts/migrate.ts",
+    "clave-botonera": "tsx --env-file=../../.env scripts/clave-botonera.ts"
   },
   "dependencies": {
     "@botonera/shared": "*",

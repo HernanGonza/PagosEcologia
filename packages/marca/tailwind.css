@@ -1,0 +1,24 @@
+/* Para apps con Tailwind v4: tokens de marca + utilidades (bg-verde-600, text-rosa-600, font-marca…). */
+@import "./marca.css";
+
+@theme inline {
+  --color-verde-900: var(--verde-900);
+  --color-verde-800: var(--verde-800);
+  --color-verde-700: var(--verde-700);
+  --color-verde-600: var(--verde-600);
+  --color-verde-500: var(--verde-500);
+  --color-oliva-600: var(--oliva-600);
+  --color-oliva-400: var(--oliva-400);
+  --color-sage-300: var(--sage-300);
+  --color-sage-200: var(--sage-200);
+  --color-crema: var(--crema);
+  --color-crema-200: var(--crema-200);
+  --color-crema-300: var(--crema-300);
+  --color-rosa-700: var(--rosa-700);
+  --color-rosa-600: var(--rosa-600);
+  --color-rosa-400: var(--rosa-400);
+  --color-rosa-300: var(--rosa-300);
+  --color-ok: var(--ok);
+  --color-aviso: var(--aviso);
+  --font-marca: var(--font-marca);
+}

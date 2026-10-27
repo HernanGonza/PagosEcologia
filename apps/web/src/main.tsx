@@ -1,16 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import Fitosanitarios from './modules/fitosanitarios';
 import Home from './pages/Home';
-import Pagar from './pages/Pagar';
-import './styles.css';
+import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/pagar/:slug" element={<Pagar />} />
+        <Route path="/pagar/fitosanitarios" element={<Fitosanitarios />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

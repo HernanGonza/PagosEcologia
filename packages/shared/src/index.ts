@@ -34,3 +34,4 @@ export interface CatalogoResponse {
   modulos: Modulo[];
 }
 export * from './contrato.js';
+export * from './admin.js';

@@ -1,11 +1,17 @@
 {
   "name": "botonera-pagos",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev:api": "npm run dev -w @botonera/api",
     "dev:relevamiento": "npm run dev -w @botonera/relevamiento",
     "dev:web": "npm run dev -w @botonera/web",
-    "build": "npm run build -w @botonera/web && npm run build -w @botonera/api"
+    "build": "npm run build -w @botonera/web && npm run build -w @botonera/admin && npm run build -w @botonera/api",
+    "migrate": "npm run migrate -w @botonera/api",
+    "clave-botonera": "npm run clave-botonera -w @botonera/api",
+    "dev:admin": "npm run dev -w @botonera/admin"
   }
 }

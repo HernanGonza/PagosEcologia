@@ -1,1 +1,1 @@
-{ "extends": "../../tsconfig.base.json", "compilerOptions": { "jsx": "react-jsx", "lib": ["ES2022","DOM","DOM.Iterable"], "types": ["node"], "noEmit": true }, "include": ["src", "server"] }
+{"extends": "../../tsconfig.base.json", "compilerOptions": {"jsx": "react-jsx", "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["node", "vite/client"], "noEmit": true}, "include": ["src", "server"]}

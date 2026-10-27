@@ -20,7 +20,9 @@ Botonera para que el público pague desde la página del Ministerio de Ecología
 |---|---|
 | Monorepo | npm workspaces |
 | Lenguaje | TypeScript (en todo el repo) |
-| Front (`apps/web`) | React 18, Vite, React Router 6, lucide-react (íconos) |
+| Front (`apps/web`) | React 19, Vite, React Router 6, Tailwind v4, shadcn + [Watermelon UI](https://ui.watermelon.sh), motion, lucide-react |
+| Panel (`apps/admin`) | React 19, Vite, Tailwind v4, shadcn + Watermelon UI, recharts |
+| Marca (`packages/marca`) | Oak Sans, paleta y logos del Brandbook 2024, compartidos por todas las apps |
 | Back (`apps/api`) | Node.js, Express 5, `pg` (conexión directa a Postgres), `cors` |
 | Código compartido (`packages/shared`) | Tipos TypeScript compartidos entre front y back |
 | Base de datos | PostgreSQL, en el Supabase self-hosted de Ecodatos |
@@ -31,12 +33,13 @@ Botonera para que el público pague desde la página del Ministerio de Ecología
 
 ## 🔌 Conexión a Supabase (Ecodatos)
 
-La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el otro sistema del ministerio. Usamos un schema propio (`recaudaciones`) dentro de esa instancia, separado de los datos de Ecodatos.
+La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el otro sistema del ministerio. Usamos un schema propio (`pagos`) dentro de esa instancia, separado de los datos de Ecodatos.
 
 - La API se conecta directo a Postgres con `pg`, usando la variable `DATABASE_URL` del `.env`.
 - El front nunca habla con Supabase: todo pasa por la API. El schema no se expone en PostgREST y tiene RLS activado por prevención.
 - Las credenciales no están en el repo. Cada quien arma su `.env` a partir de `.env.example` y las pide al dueño del proyecto.
-- Las migraciones de `db/migrations/` las corre el dueño del proyecto sobre esa instancia; desde este repo no se modifica la base.
+- Las migraciones de `db/migrations/` las corre el dueño del proyecto con `npm run migrate` (rol `postgres`, `MIGRATIONS_DATABASE_URL`). Quedan registradas en `pagos._migraciones`.
+- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` solo lee `fitosanitarios_domisanitarios` / `tipos_fito_domi` y actualiza `anio_pago_registro`.
 
 ## 🏗️ Arquitectura
 
@@ -55,46 +58,28 @@ Un módulo nuevo no toca el resto del sistema.
 ```
 botonera-pagos/
 ├─ apps/
-│  ├─ web/        Vite + React + TypeScript: botonera pública + /pagar/:slug + /admin
-│  └─ api/        Node + Express + TypeScript
-│     └─ src/modules/<slug>/   un módulo por carpeta (definición, resolver, validaciones)
+│  ├─ web/            botonera pública: home + /pagar/<slug>
+│  │  └─ src/modules/<slug>/   pantalla de cada trámite
+│  ├─ admin/          panel de Recaudaciones
+│  ├─ api/            Node + Express + TypeScript
+│  │  └─ src/modules/<slug>/   endpoints de cada trámite
+│  └─ relevamiento/   herramienta local de relevamiento
 ├─ packages/
-│  └─ shared/     tipos y esquemas compartidos front/back
-└─ db/migrations/ SQL del schema "recaudaciones"
+│  ├─ shared/         tipos compartidos front/back (contrato de los trámites)
+│  └─ marca/          fuentes, paleta y logos del ministerio
+└─ db/migrations/ SQL del schema "pagos"
 ```
 
 - Monorepo con npm workspaces. **Todos los módulos viven en este mismo repo**, no hay un repo por módulo: el back en `apps/api/src/modules/<slug>/` y, si es complejo, su componente en `apps/web/src/modules/<slug>/`.
-- El panel admin va dentro de `web` bajo `/admin`, con lazy loading.
+- El panel de Recaudaciones es una app aparte (`apps/admin`).
 - Backend: `core/` (pagos, comprobantes, auth, proveedor de pago) y una carpeta `modules/<slug>/` por proceso, con su definición, resolver de deuda, validaciones y hooks.
-- Front: la home lee `GET /api/modulos` y dibuja los botones. `/pagar/:slug` renderiza un formulario generado desde la config (módulo simple) o carga su componente con `React.lazy` (módulo complejo).
+- Front: la home dibuja los botones desde `apps/web/src/modules/registry.ts` y cada `/pagar/<slug>` tiene su pantalla. Más adelante, la home va a leer `GET /api/modulos` y los trámites simples van a usar un formulario generado desde la config.
 
 ### 🧩 Cómo se hacen los módulos
 
-**Un módulo no es una app Vite+React aparte.** Hay un solo front (`apps/web`) y una sola API (`apps/api`); un módulo es una carpeta o una fila de configuración que se enchufa en ellos. Todo vive en este repo, sin repo ni build por módulo.
+**Un módulo no es una app Vite+React aparte.** Hay un solo front público (`apps/web`) y una sola API (`apps/api`); un módulo es una migración, una carpeta en la API y una carpeta en el front que se enchufan en ellos. Todo vive en este repo, sin repo ni build por módulo.
 
-| Tipo | Qué hay que crear | Código |
-|---|---|---|
-| Simple | Una fila en `recaudaciones.modulos` con su `config` (campos, monto fijo o fórmula). | Ninguno |
-| Con consulta | Lo anterior, más `apps/api/src/modules/<slug>/` con el resolver que busca la deuda. | Solo back |
-| Complejo | Lo anterior, más `apps/web/src/modules/<slug>/` con su componente React, cargado con `React.lazy`. | Back y front |
-
-Pasos para sumar un módulo:
-
-1. **Base:** una migración nueva en `db/migrations/` que inserte la fila en `modulos` (y la categoría si es nueva) y cree las tablas propias con prefijo (`apeo_actas`, `fito_certificados`, …).
-2. **Back (si consulta o complejo):** carpeta `apps/api/src/modules/<slug>/` con la definición, el resolver de deuda, las validaciones y los hooks. El monto y el estado se calculan siempre acá, nunca en el front.
-3. **Front (solo si complejo):** carpeta `apps/web/src/modules/<slug>/` con el componente. Si el módulo no la tiene, `/pagar/:slug` usa el formulario genérico generado desde la config.
-4. **Tipos compartidos:** lo que usen el front y el back va en `packages/shared`.
-
-```
-apps/api/src/modules/apeo-ilegal/        apps/web/src/modules/fitosanitarios/
-├─ index.ts      definición + registro   └─ index.tsx   componente del flujo propio
-├─ resolver.ts   busca la deuda (acta/CUIT)
-└─ validar.ts    reglas del módulo
-```
-
-El módulo no conoce al proveedor de pago: usa el `core/` (órdenes de pago, comprobantes). La validación del contribuyente la define el propio módulo (ver [Acceso sin login](#-acceso-sin-login)).
-
-> ⚠️ **Estado:** hoy `modules/` está vacío y el front usa el flujo genérico para todos. El contrato exacto (qué exporta `index.ts` y cómo se registra) se define con el primer módulo, multas por apeo ilegal, y se documenta acá. Los nombres de archivo del ejemplo son una propuesta.
+La idea a futuro es que un trámite **simple** sea solo configuración (una fila en `pagos.modulos`) y lo dibuje un formulario genérico. **Eso todavía no existe**: hoy cada módulo lleva migración, API y componente propio, como `fitosanitarios`. El paso a paso está en [Cómo crear un módulo nuevo](#-cómo-crear-un-módulo-nuevo-paso-a-paso).
 
 ### 🌿 Flujo de ramas
 
@@ -107,7 +92,7 @@ Trabajamos **una rama por módulo**, salidas de `develop`:
 - `develop` es la rama de trabajo: ahí se junta todo lo que se va terminando.
 - `main` es la rama de **despliegue**. Cuando `develop` está estable, se pasa a `main` y de ahí sale lo que se publica. No se trabaja directo en `main`.
 
-### 🗄️ Schema `recaudaciones` (núcleo)
+### 🗄️ Schema `pagos` (núcleo)
 
 - `modulos`: slug, nombre, ícono, categoría, orden, activo, tipo, configuración (jsonb)
 - `categorias`: agrupan los botones
@@ -129,6 +114,256 @@ Cada módulo suma sus propias tablas con prefijo (`apeo_actas`, `fito_certificad
 4. Montos y estados se calculan y validan solo en el back. El front nunca manda un monto.
 5. Webhooks idempotentes y conciliación diaria (es plata pública).
 6. Las migraciones quedan como archivos SQL; las corre el dueño del proyecto. No se toca el Supabase desde acá.
+
+## 🧱 Cómo crear un módulo nuevo (paso a paso)
+
+Guía para sumar un trámite a la botonera. El ejemplo de referencia es `fitosanitarios`: ante la duda, mirá cómo está hecho ahí.
+
+> **Qué hay hoy y qué no.** Hoy cada módulo tiene migración, rutas propias en la API y pantalla propia en el front. Todavía **no existen** el formulario genérico para trámites simples, el endpoint común `POST /api/modulos/:slug/validar`, el CAPTCHA, ni la creación de órdenes contra MacroClick (el pago de `fitosanitarios` es una demostración). Cuando se agreguen, esta guía se actualiza.
+
+### Resumen: qué se toca
+
+| # | Dónde | Qué | ¿Obligatorio? |
+|---|---|---|---|
+| 1 | `db/migrations/NNNN_<slug>.sql` | Categoría, fila en `pagos.modulos` con su `config`, tablas propias, permisos y RLS | Sí |
+| 2 | `apps/api/src/modules/<slug>/index.ts` | Router de Express con los endpoints del trámite | Sí |
+| 3 | `apps/api/src/server.ts` | Montar el router en `/api/<slug>` | Sí |
+| 4 | `apps/web/src/modules/<slug>/index.tsx` | Pantalla del trámite | Sí |
+| 5 | `apps/web/src/modules/registry.ts` | Ficha del botón en la home | Sí |
+| 6 | `apps/web/src/main.tsx` | Ruta `/pagar/<slug>` | Sí |
+| 7 | `packages/shared/src/` | Tipos que comparten front y back | Si hace falta |
+| — | `apps/admin` | **Nada.** El panel lo toma solo de la base | — |
+
+### El slug
+
+Antes de escribir código, elegí el **slug**: identificador corto, en minúsculas, con guiones y sin tildes (`guia-transito-forestal`, `multa-apeo`). Tiene que ser **exactamente el mismo** en todos lados:
+
+- `pagos.modulos.slug`, `pagos.tarifas.modulo_slug` y `pagos.ordenes_pago.modulo_slug`
+- la carpeta `apps/api/src/modules/<slug>/` y la ruta `/api/<slug>`
+- la carpeta `apps/web/src/modules/<slug>/`, la ruta `/pagar/<slug>` y la entrada en `registry.ts`
+
+Si no coinciden, el panel no asocia los pagos al trámite.
+
+### Paso 0 · Rama y relevamiento
+
+1. Traé lo último de `develop` y abrí la rama: `git checkout develop && git pull && git checkout -b modulo/<slug>`.
+2. Tené a mano la ficha del proceso de la herramienta de relevamiento (`npm run dev:relevamiento`). De ahí salen las respuestas a estas preguntas:
+
+| Pregunta | Dónde va |
+|---|---|
+| ¿Qué datos se le piden a la persona? (CUIT, nº de acta, cantidad de m³…) | `config.campos` |
+| ¿Tiene que figurar en algún registro, o tener una deuda? ¿En qué tabla? | `config.requisito` |
+| ¿Cómo se calcula el monto? ¿Fijo, por fórmula, por escala o es el de la deuda? | `config.monto` |
+| ¿Qué valores tiene hoy y desde cuándo rigen? | Tarifas (las carga Recaudaciones, o la migración si ya hay un valor oficial) |
+| ¿Hay que leer o modificar tablas de Ecodatos (`public`)? ¿Qué columnas? | Permisos en la migración |
+| ¿Qué se guarda de cada pago además de la orden? | Tablas propias `pagos.<prefijo>_…` |
+
+### Paso 1 · Migración
+
+Creá `db/migrations/NNNN_<slug>.sql` con el número siguiente al último (hoy el último es `0004`). Las migraciones corren en orden alfabético, una sola vez cada una, y quedan registradas en `pagos._migraciones`.
+
+> ⚠️ **Nunca edites una migración que ya se aplicó**: no vuelve a correr. Para corregir algo, hacé una migración nueva.
+
+Plantilla comentada:
+
+```sql
+-- Módulo: <nombre del trámite>. <Qué hace, de dónde lee y qué guarda.>
+
+-- 1) Categoría (agrupa los botones). Si ya existe, no hace nada.
+insert into pagos.categorias (slug, nombre, orden)
+values ('forestal', 'Forestal', 2)
+on conflict (slug) do nothing;
+
+-- 2) El trámite. `config` sigue ConfigModulo (packages/shared/src/contrato.ts).
+--    tipo: 'simple' | 'consulta' | 'complejo'.
+insert into pagos.modulos (slug, nombre, descripcion, icono, categoria_slug, tipo, orden, config)
+values ('guia-transito-forestal', 'Guía de tránsito forestal', 'Pagá la guía para transportar madera', 'truck',
+        'forestal', 'consulta', 1,
+        '{
+          "campos": [
+            { "name": "cuit", "label": "CUIT", "type": "text", "required": true },
+            { "name": "m3",   "label": "Metros cúbicos", "type": "number", "required": true }
+          ],
+          "requisito": { "tipo": "registro", "registro": "transportistas", "campo": "cuit" },
+          "monto": { "tipo": "formula", "base": "tasa-base", "porCampo": [{ "campo": "m3", "concepto": "valor-m3" }] }
+        }'::jsonb)
+on conflict (slug) do update set
+  nombre = excluded.nombre, descripcion = excluded.descripcion, icono = excluded.icono,
+  categoria_slug = excluded.categoria_slug, tipo = excluded.tipo, config = excluded.config;
+
+-- 3) Tablas propias, siempre en `pagos` y con prefijo del módulo.
+--    Apuntan a la orden; la orden apunta acá con modulo_slug + ref_id.
+create table pagos.guia_emisiones (
+  id          bigint generated always as identity primary key,
+  orden_id    bigint not null unique references pagos.ordenes_pago(id),
+  cuit        text not null,
+  m3          numeric not null,
+  created_at  timestamptz not null default now()
+);
+
+-- 4) RLS: OBLIGATORIO en cada tabla nueva. Sin política, la API (rol botonera)
+--    no ve ninguna fila y no puede insertar.
+alter table pagos.guia_emisiones enable row level security;
+create policy botonera_api on pagos.guia_emisiones
+  for all to botonera using (true) with check (true);
+
+-- 5) Solo si el módulo lee o modifica tablas de Ecodatos (public): lo mínimo,
+--    columna por columna, con su política (esas tablas también tienen RLS).
+-- grant select on public.transportistas to botonera;
+-- grant update (vencimiento) on public.transportistas to botonera;
+-- create policy botonera_lectura on public.transportistas for select to botonera using (true);
+-- create policy botonera_actualiza on public.transportistas for update to botonera using (true) with check (true);
+
+-- 6) Opcional: valor inicial de las tarifas, solo si hay un valor oficial.
+--    `valor` va en CENTAVOS (o tramos para 'escala'). Si no, se carga desde el panel.
+-- insert into pagos.tarifas (modulo_slug, concepto, valor, vigente_desde, creado_por)
+-- values ('guia-transito-forestal', 'tasa-base', '150000'::jsonb, '2026-11-01', 'migracion');
+```
+
+Sobre la `config`:
+
+- **`campos`**: lo que se pide en pantalla. `type` es `text`, `number` o `select` (con `options`).
+- **`requisito`**: `{ "tipo": "ninguno" }` (libre), `registro` (debe figurar en un registro) o `deuda` (se busca una deuda). Ver [Contrato de un trámite](#-contrato-de-un-trámite).
+- **`monto`**: `fijo`, `formula`, `escala` o `deuda`. **Nunca lleva números**: cada `concepto` es un nombre (`tasa-base`, `valor-m3`) cuyo valor vive en `pagos.tarifas`. Usá nombres en minúsculas con guiones y escribilos igual en la `config`, en las tarifas y en el código.
+- Se pueden agregar claves propias del módulo (como `validez_dias` en fitosanitarios), siempre que `campos`, `requisito` y `monto` estén.
+
+Para aplicarla: la corre **el dueño del proyecto** con `npm run migrate`, que usa `MIGRATIONS_DATABASE_URL` (rol `postgres`). La API nunca corre migraciones. Pasale el archivo y avisá qué toca de `public`, si toca algo.
+
+### Paso 2 · API
+
+Creá `apps/api/src/modules/<slug>/index.ts` con un `Router` de Express. Ejemplo mínimo:
+
+```ts
+import { Router } from 'express';
+import { pool } from '../../db.js';
+
+export const guiaTransitoRouter = Router();
+
+// Valor vigente de un concepto (centavos). Rige la última tarifa con vigente_desde <= hoy.
+async function tarifaVigente(concepto: string) {
+  const r = await pool.query(
+    `select id, valor from pagos.tarifas
+      where modulo_slug = 'guia-transito-forestal' and concepto = $1 and vigente_desde <= current_date
+      order by vigente_desde desc, id desc limit 1`,
+    [concepto],
+  );
+  return r.rows[0] as { id: string; valor: number } | undefined;
+}
+
+guiaTransitoRouter.get('/cotizar', async (req, res, next) => {
+  try {
+    const m3 = Number(req.query.m3);
+    if (!Number.isFinite(m3) || m3 <= 0) {
+      res.status(400).json({ error: 'Ingresá una cantidad de metros cúbicos válida.' });
+      return;
+    }
+    const [base, porM3] = await Promise.all([tarifaVigente('tasa-base'), tarifaVigente('valor-m3')]);
+    if (!base || !porM3) {
+      res.status(503).json({ error: 'El valor de este trámite todavía no está configurado.' });
+      return;
+    }
+    res.json({ importe_centavos: base.valor + porM3.valor * m3 });
+  } catch (error) {
+    next(error);
+  }
+});
+```
+
+Y montalo en `apps/api/src/server.ts`:
+
+```ts
+import { guiaTransitoRouter } from './modules/guia-transito-forestal/index.js';
+// ...
+app.use('/api/guia-transito-forestal', guiaTransitoRouter);
+```
+
+Reglas del back (no son opcionales):
+
+- **El monto se calcula acá**, con las tarifas de la base. El front nunca manda un monto ni un número de tarifa.
+- **Consultas siempre parametrizadas** (`$1`, `$2`). Nunca armar SQL concatenando lo que manda el usuario.
+- **Validar formato** de cada dato (largo, dígitos, CUIT con dígito verificador) y responder `400` con un mensaje claro en castellano.
+- **Datos mínimos**: si el trámite consulta un registro, devolver solo lo necesario para que la persona confirme (razón social, estado). Nunca domicilio, teléfono ni documentos.
+- **Si falta algo de configuración** (tarifa sin cargar, columna que el área todavía no agregó), responder `503` con un mensaje, no inventar valores.
+- Si el módulo escribe en `public`, que sea solo en las columnas que le dio la migración, y dejando registro en su tabla propia (qué había antes y qué quedó), como `pagos.fito_renovaciones`.
+- Endpoints que cambian datos van por `POST`; los de consulta, por `GET`.
+
+### Paso 3 · Front
+
+1. **Pantalla:** `apps/web/src/modules/<slug>/index.tsx`, con export default del componente. Envolvé todo en `Marco` (encabezado y pie con la marca) y usá los componentes de `src/components/ui` y `src/components/watermelon`. Para sumar uno de Watermelon: `npx shadcn@latest add @watermelon/<nombre>` desde `apps/web`. Los colores son las clases de la marca (`bg-verde-600`, `text-rosa-600`, `bg-crema-200`…, definidas en `packages/marca`); no uses colores sueltos.
+2. **Botón en la home:** sumá la ficha en `apps/web/src/modules/registry.ts`:
+
+   ```ts
+   {
+     slug: 'guia-transito-forestal',
+     nombre: 'Guía de tránsito forestal',
+     descripcion: 'Pagá la guía para transportar madera.',
+     categoria: 'Forestal',
+     icono: 'truck',
+   },
+   ```
+
+   El `icono` tiene que estar en el mapa de `apps/web/src/components/Icono.tsx` (si no está, se muestra uno genérico; agregalo ahí importándolo de `lucide-react`). Ojo: la home lee este archivo, **no** la tabla `pagos.modulos`, así que desactivar el módulo en la base no saca el botón.
+3. **Ruta:** en `apps/web/src/main.tsx`:
+
+   ```tsx
+   import GuiaTransito from './modules/guia-transito-forestal';
+   // ...
+   <Route path="/pagar/guia-transito-forestal" element={<GuiaTransito />} />
+   ```
+
+4. **Llamar a la API:** con `fetch('/api/<slug>/...')`. En desarrollo, Vite manda `/api` a la API (puerto 3001).
+5. **Datos de prueba**, si la API todavía no puede responder: en un archivo aparte dentro de la carpeta del módulo (como `fitosanitarios/demo.ts`), marcado como demostración. Nunca se usan para cobrar.
+
+### Paso 4 · Tipos compartidos (si hace falta)
+
+Si el front y el back intercambian una forma de datos propia del módulo (la respuesta de `/cotizar`, por ejemplo), declarala en `packages/shared/src/` y exportala desde `index.ts`. Así un cambio en el back rompe la compilación del front en vez de fallar en producción. Los tipos del contrato general (`ConfigModulo`, `Requisito`, `CalculoMonto`…) no se tocan desde un módulo: eso va en una rama `core/`.
+
+### Paso 5 · Panel de Recaudaciones: no hay que hacer nada
+
+`apps/admin` no tiene código por módulo. Con la migración aplicada, el trámite aparece solo:
+
+| Pantalla | De dónde lo saca |
+|---|---|
+| Resumen y Pagos y órdenes | `pagos.ordenes_pago` con `modulo_slug = '<slug>'` |
+| Trámites y tarifas | `pagos.modulos.config`: los campos que pide, el tipo de requisito y los conceptos de tarifa que necesita (`conceptosDeMonto`) con su valor vigente |
+| Conciliación y Reportes | Todavía sin definir; van a salir de las mismas tablas |
+
+Si un concepto no tiene tarifa cargada, el panel lo muestra como **"Sin valor: el trámite no puede cobrar"**. Así se nota que falta cargar el valor.
+
+### Paso 6 · Probar
+
+```bash
+npm run dev:api      # API en :3001 (necesita DATABASE_URL)
+npm run dev:web      # botonera
+npm run dev:admin    # panel (necesita ADMIN_SIN_LOGIN=true)
+npm run build        # typecheck y build de web, admin y api: tiene que pasar sin errores
+```
+
+Revisá:
+
+- [ ] El botón aparece en la home, en su categoría, y el buscador lo encuentra.
+- [ ] `/pagar/<slug>` funciona en celular y en escritorio.
+- [ ] Los datos inválidos muestran un mensaje claro, y lo que no está configurado devuelve `503`, no un error 500.
+- [ ] `curl localhost:3001/api/admin/tramites` muestra el trámite con sus campos y conceptos.
+- [ ] En el panel, "Trámites y tarifas" muestra el trámite con sus conceptos.
+
+### Paso 7 · Cerrar
+
+1. Actualizá este README: el módulo en [Estado actual](#-estado-actual) y la migración nueva en la lista.
+2. Traé lo último de `develop`, resolvé conflictos y abrí el PR de `modulo/<slug>` a `develop`. En la descripción, poné qué migración hay que correr y qué permisos sobre `public` pide.
+3. Después del merge, el dueño del proyecto corre `npm run migrate`.
+
+### Errores comunes
+
+| Síntoma | Causa probable |
+|---|---|
+| La API no ve filas de una tabla nueva, o falla al insertar con `new row violates row-level security policy` | Falta la política `botonera_api` de la tabla (paso 1, punto 4) |
+| `permission denied for table …` en `public` | Falta el `grant` en la migración, o se está escribiendo una columna que no se habilitó |
+| La migración falla con `violates foreign key constraint … categorias` | La categoría no existe: insertala antes que el módulo |
+| El panel dice "Sin valor" aunque hay tarifa | El `concepto` de la tarifa no se escribe igual que en `config.monto`, o su `vigente_desde` es futura |
+| El trámite no aparece en el panel | El `slug` no coincide, o `config` no tiene `campos` / `requisito` / `monto` |
+| Cambié una migración y no pasó nada | Las migraciones aplicadas no vuelven a correr: hacé una nueva |
+| El botón tiene un ícono genérico | El `icono` no está en `Icono.tsx` |
 
 ## 🧭 Cómo funciona
 
@@ -197,7 +432,7 @@ interface ConfigModulo {
 
 **Resolver.** Los trámites con `registro` o `deuda` implementan `Resolver.consultar(datos)` en `apps/api/src/modules/<slug>/resolver.ts`. Devuelve si encontró algo y los `DatosMinimos` (titular, estado, concepto), nunca domicilio ni teléfono. Para `deuda`, además el monto.
 
-> ⚠️ Es la primera versión: se ajusta con el primer módulo real (multas por apeo ilegal). Todavía no está conectado al mock ni a la API.
+> El contrato se está definiendo con el módulo de fitosanitarios. La consulta API ya tiene endpoint propio; el flujo público de interfaz sigue usando datos de demostración.
 
 El detalle de los niveles de validación y sus resguardos (anti-abuso, datos mínimos) está en [Acceso sin login](#-acceso-sin-login).
 
@@ -275,24 +510,31 @@ Reglas:
 
 ## 🚦 Estado actual
 
-Es un mock del front, sin base ni API.
+El catálogo genérico de ejemplo se retiró para empezar el primer módulo con código aislado.
 
-- Home con 11 botones de ejemplo en 5 categorías (Forestal, Fitosanitarios, Fauna, Control ambiental, Trámites y tasas), con íconos y buscador.
-- Catálogo en `apps/web/src/mock/catalogo.ts` (único archivo a editar para cambiar botones). `VITE_USE_MOCK=false` vuelve a la API real.
-- `/pagar/:slug`: flujo simulado completo (datos, resumen con total, pago de "MacroClick", comprobante imprimible). Los campos y el monto salen de la config del módulo.
-- Los módulos marcados como complejo (guías forestales, fitosanitarios, evaluación ambiental) usan hoy el flujo genérico.
-- API Express con `GET /api/health` y `GET /api/modulos`.
-- Migraciones: `0001` crea el schema con `categorias` y `modulos`; `0002` carga datos de ejemplo.
+- `/`: botonera de entrada con buscador y tarjetas para los módulos registrados en `apps/web/src/modules/registry.ts`.
+- `/pagar/fitosanitarios`: módulo propio de Registro de fitosanitarios y domisanitarios. Cada trámite conserva su flujo dentro de su carpeta y aporta una ficha a la botonera.
+- La pantalla permite buscar por DNI/CUIT, ver el último certificado y su vencimiento, simular una renovación anual y mostrar una maqueta imprimible/guardable como PDF.
+- Los registros de prueba y el precio ilustrativo están aislados en `apps/web/src/modules/fitosanitarios/demo.ts`. No son datos reales ni se usan para cobrar.
+- API propia: `GET /api/fitosanitarios/certificados/:identificador` y `GET /api/fitosanitarios/tarifa`.
+- Migraciones: `0001_pagos_base.sql` (núcleo), `0002_fitosanitarios.sql` (renovaciones; el registro se lee de `public.fitosanitarios_domisanitarios`), `0003_rol_botonera.sql` (rol de la API), `0004_config_fitosanitarios.sql` (config según `ConfigModulo`). Falta que el área agregue DNI/CUIT y vencimiento en el registro.
+- El pago todavía no está integrado a MacroClick ni crea certificados persistentes; el circuito público sigue siendo una demostración.
+
+### 📊 Panel de Recaudaciones (`apps/admin`)
+
+- App aparte: Vite + React 19 + Tailwind v4 + shadcn (Radix) con componentes de [Watermelon UI](https://ui.watermelon.sh). Se suman con `npx shadcn@latest add @watermelon/<nombre>` desde `apps/admin`.
+- Base visual: el bloque `capitalio-dashboard`, que queda sin tocar en `src/components/watermelon/`; el panel propio vive en `src/panel/` y reutiliza su CSS, tarjetas, tooltips e íconos.
+- Pantallas: Resumen (indicadores, recaudación por día/mes, por trámite, últimos pagos), Pagos y órdenes (filtros, búsqueda, paginado, CSV), Trámites y tarifas, Auditoría. Conciliación y Reportes quedan como pendientes de definir.
+- API: `GET /api/admin/resumen?periodo=hoy|7d|30d|anio`, `/ordenes`, `/tramites`, `/auditoria` (tipos en `packages/shared/src/admin.ts`).
+- **Login preparado, sin conectar:** `/login` (adaptado de Watermelon `auth-11`) deja entrar sin completar nada. Todo pasa por `src/panel/sesion.tsx` (`LOGIN_CONECTADO`, `iniciarSesion`, `RequiereSesion`); conectar el login es cambiar ese archivo y el middleware de `apps/api/src/routes/admin.ts`. Tipos de usuario y roles en `packages/shared/src/admin.ts`.
+- `/api/admin` responde solo con `ADMIN_SIN_LOGIN=true`, y eso es solo para desarrollo local.
 
 ### 🎨 Decisiones de diseño tomadas
 
 - Licencia de pesca fuera: se maneja en un sistema aparte.
-- Categoría "Fauna y pesca" renombrada a "Fauna".
 - Solo modo claro.
-- Categorías en 3 columnas (2 en tablet hasta 900 px, 1 en celular hasta 560 px), con los botones apilados debajo de cada una.
-- Botones de hasta 320 px, centrados.
-- Encabezado compacto.
-- Estilo neutro (paleta gris azulada); las variables están en `apps/web/src/styles.css`, así que un manual de marca se aplica en un solo lugar.
+- El primer módulo usa una pantalla propia, adaptable a celular y escritorio, con flujo de búsqueda, renovación y certificado imprimible.
+- Estilos del Brandbook 2024 del ministerio (Oak Sans, verde `#3E6C51`, crema, rosa lapacho, logo oficial) en todas las apps. Viven en `packages/marca`: un cambio ahí se aplica en la botonera, el panel y el relevamiento.
 
 ### ▶️ Cómo correrlo
 
@@ -300,17 +542,18 @@ Es un mock del front, sin base ni API.
 npm install
 cp .env.example .env     # completar DATABASE_URL (solo si se usa la API)
 npm run dev:web          # front
-npm run dev:api          # API (no hace falta para el mock)
+npm run dev:api          # API (requiere DATABASE_URL)
+npm run dev:admin        # panel de Recaudaciones → http://localhost:5174 (requiere ADMIN_SIN_LOGIN=true en .env)
 ```
 
-## ✅ Pendiente
+## ✅ Pendiente del módulo fitosanitarios
 
-- Manual técnico y credenciales de MacroClick.
-- Lista real de trámites y pagos del ministerio (se carga como filas de `modulos` y `categorias`, o en el mock).
-- `ordenes_pago` y `pagos`, con el circuito completo usando el proveedor mock, empezando por un módulo (multas por apeo ilegal) para definir el contrato que seguirán los demás.
-- Panel `/admin`: configuración de trámites (tarifas versionadas) y panel de Recaudaciones (conciliación, estadísticas, filtros, reportes). Ver la sección «Panel de administración».
-- Definir con cada área qué registro valida cada trámite (empezando por el Registro de Transportistas) y de dónde se lee.
-- Contrato del resolver de registro: búsqueda por CUIT, validación de formato, datos mínimos que devuelve, límite de consultas y CAPTCHA.
+- Relevar campos y estados oficiales del registro, cómo se determina la habilitación y el formato del certificado.
+- Importar y depurar el Excel de titulares y certificados en las tablas propias mediante un proceso controlado.
+- Configurar la tarifa oficial desde administración y conectar el importe calculado por API con una orden de pago.
+- Confirmar pago con el proveedor y emitir/guardar el certificado definitivo de un año.
+- Acordar CAPTCHA y límite de consultas antes de exponer la búsqueda pública.
+- Manual técnico y credenciales de MacroClick; panel `/admin` y funcionalidades generales de Recaudaciones.
 
 ## 📋 Herramienta de relevamiento (local)
 

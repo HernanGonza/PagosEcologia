@@ -1,0 +1,11 @@
+{
+  "name": "@botonera/marca",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./marca.css": "./marca.css",
+    "./logos/*": "./logos/*",
+    "./tailwind.css": "./tailwind.css"
+  }
+}

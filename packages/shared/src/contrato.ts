@@ -127,3 +127,17 @@ export interface Resolver {
 export type ResultadoConsulta =
   | { encontrado: true; datosMinimos: DatosMinimos; /** Solo para 'deuda'. */ monto?: number }
   | { encontrado: false; motivo: Extract<MotivoRechazo, 'no_registrado' | 'no_habilitado' | 'sin_deuda'> };
+
+/** Conceptos de tarifa que necesita un cálculo de monto. El panel los usa para pedir sus valores. */
+export function conceptosDeMonto(monto: CalculoMonto | undefined): string[] {
+  if (!monto) return [];
+  switch (monto.tipo) {
+    case 'fijo':
+    case 'escala':
+      return [monto.concepto];
+    case 'formula':
+      return [monto.base, ...monto.porCampo.map((p) => p.concepto)];
+    case 'deuda':
+      return [];
+  }
+}

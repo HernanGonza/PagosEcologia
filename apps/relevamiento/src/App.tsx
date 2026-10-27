@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ESTADOS, PRIORIDAD, SECCIONES, TIPOS, WEB, type Kind, type Proceso } from './types';
 import { GUIA } from './guia';
+import logoBlanco from '@botonera/marca/logos/ecologia-misiones-horizontal-blanco.svg';
+import flor from '@botonera/marca/logos/flor-lapacho.svg';
 
 type Resumen = Omit<Proceso, 'items'>;
 type Tab = 'procesos' | 'guia' | 'exportar';
@@ -22,7 +24,10 @@ export default function App() {
   return (
     <>
       <header className="top">
-        <h1>Relevamiento de pagos</h1>
+        <div className="marca">
+          <img src={logoBlanco} alt="Ecología Misiones" />
+          <h1><small>Herramienta interna</small>Relevamiento de pagos</h1>
+        </div>
         <nav>
           {(['procesos', 'guia', 'exportar'] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
@@ -81,7 +86,7 @@ function Procesos({ lista, sel, setSel, recargar }: { lista: Resumen[]; sel: num
       </aside>
       <main>
         {sel ? <Editor key={sel} id={sel} alGuardar={recargar} alBorrar={() => { setSel(null); recargar(); }} />
-          : <div className="vacio"><h2>Elegí un proceso o creá uno nuevo</h2>
+          : <div className="vacio"><img src={flor} alt="" /><h2>Elegí un proceso o creá uno nuevo</h2>
             <p>Empezá por cargar la lista de todo lo que cobra el ministerio (una ficha por pago, con título y área nomás). Después completá el detalle de cada uno. Mirá la pestaña «Guía de relevamiento» para saber qué preguntar.</p></div>}
       </main>
     </div>
@@ -91,7 +96,7 @@ function Procesos({ lista, sel, setSel, recargar }: { lista: Resumen[]; sel: num
 function Editor({ id, alGuardar, alBorrar }: { id: number; alGuardar: () => void; alBorrar: () => void }) {
   const [p, setP] = useState<Proceso | null>(null);
   const [estado, setEstado] = useState<'ok' | 'guardando' | 'error'>('ok');
-  const timer = useRef<number>();
+  const timer = useRef<number | undefined>(undefined);
   const sucio = useRef(false);
   const ultimo = useRef<Proceso | null>(null);
 
