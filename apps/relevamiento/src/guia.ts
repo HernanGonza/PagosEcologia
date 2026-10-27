@@ -80,4 +80,23 @@ export const GUIA: Seccion[] = [
       { clave: 'tec-botones', texto: 'Quién maneja la página del ministerio donde van los botones y cómo se enlazan' },
     ],
   },
+  {
+    titulo: '7. Fitosanitarios: solicitudes con revisión técnica',
+    intro: 'El certificado se pide sin cuenta: la persona elige el tipo, verifica su mail, carga datos y documentos, y los técnicos aprueban, observan o rechazan antes del pago. Hace falta definir con Control Ambiental todo lo que sigue.',
+    items: [
+      { clave: 'fito-tipos', texto: 'Lista completa de tipos de certificado (vehículo, comercio, depósito, …) y en qué se diferencian' },
+      { clave: 'fito-codigos', texto: 'Qué significan los códigos del registro de Ecodatos (D, C, CDD, CIDD, NG, CF, DF1, CDT…) y cómo se corresponden con los tipos de certificado' },
+      { clave: 'fito-requisitos', texto: 'Por cada tipo: qué datos se piden y qué documentos se presentan (formato, si es obligatorio, si vence)' },
+      { clave: 'fito-tasa', texto: 'Si la tasa cambia según el tipo de certificado, la cantidad de vehículos o la superficie del depósito, y dónde está fijado el monto' },
+      { clave: 'fito-revisores', texto: 'Quiénes revisan las solicitudes: ¿todos los que tienen el formulario de fitosanitarios en Ecodatos, o hay que separar por tipo?' },
+      { clave: 'fito-plazos', texto: 'Plazos: cuánto tienen los técnicos para revisar, cuánto dura una aprobación sin pagar y cuánto una solicitud observada sin corregir' },
+      { clave: 'fito-motivos', texto: 'Motivos habituales de observación y de rechazo (para ofrecerlos como opciones en el panel)' },
+      { clave: 'fito-gestor', texto: 'Si el mail tiene que ser del titular o puede ser de un gestor o contador que tramita por varios' },
+      { clave: 'fito-registro', texto: 'Qué pasa en Ecodatos al aprobar o al pagar: ¿se crea o actualiza el registro automáticamente, o lo carga el área a mano?' },
+      { clave: 'fito-certificado', texto: 'Formato del certificado final: datos que lleva, firma, vigencia (¿un año desde la emisión o año calendario?) y número' },
+      { clave: 'fito-renovacion', texto: 'La renovación anual: ¿pide los mismos documentos o solo los que vencieron? ¿se avisa por mail antes del vencimiento?' },
+      { clave: 'fito-archivo', texto: 'Cuánto tiempo hay que guardar los documentos presentados y quién puede verlos' },
+      { clave: 'fito-correo', texto: 'Desde qué casilla salen los mails (código de verificación, observaciones, aprobación) y quién la administra' },
+    ],
+  },
 ];

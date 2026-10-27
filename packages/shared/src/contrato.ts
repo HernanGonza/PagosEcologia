@@ -26,7 +26,12 @@ export type Requisito =
       fuente: string;
       /** Campos del formulario que identifican la deuda. */
       campos: string[];
-    };
+    }
+  /**
+   * La persona presenta una solicitud con datos y documentos y los técnicos del área la
+   * revisan en su panel. Recién aprobada se habilita el pago. Ver `ConfigSolicitud`.
+   */
+  | { tipo: 'revision' };
 
 /**
  * Cómo se calcula el monto. Siempre se evalúa en el back.
@@ -40,7 +45,9 @@ export type CalculoMonto =
   /** El importe depende del tramo en que cae el valor del campo (ej. cantidad de m³). */
   | { tipo: 'escala'; campo: string; concepto: string }
   /** El monto es el de la deuda encontrada. Solo con requisito 'deuda'. */
-  | { tipo: 'deuda' };
+  | { tipo: 'deuda' }
+  /** El importe depende de la opción elegida en un campo (ej. el tipo de certificado). */
+  | { tipo: 'segun-opcion'; campo: string; conceptos: Record<string, string> };
 
 export interface Tramo {
   desde: number;
@@ -137,6 +144,8 @@ export function conceptosDeMonto(monto: CalculoMonto | undefined): string[] {
       return [monto.concepto];
     case 'formula':
       return [monto.base, ...monto.porCampo.map((p) => p.concepto)];
+    case 'segun-opcion':
+      return [...new Set(Object.values(monto.conceptos))];
     case 'deuda':
       return [];
   }

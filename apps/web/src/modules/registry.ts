@@ -12,7 +12,7 @@ export const modulosMenu: ModuloMenu[] = [
   {
     slug: 'fitosanitarios',
     nombre: 'Registro de fitosanitarios y domisanitarios',
-    descripcion: 'Consultá y renová tu certificado anual.',
+    descripcion: 'Pedí o renová tu certificado: presentá los requisitos en línea.',
     categoria: 'Registros y certificados',
     icono: 'leaf',
   },

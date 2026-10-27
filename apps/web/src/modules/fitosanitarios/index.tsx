@@ -1,283 +1,243 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+// Inicio del trámite: elegir el tipo de certificado, verificar el mail y crear la solicitud.
+// Desde ahí la persona sigue con su enlace privado (Solicitud.tsx).
+import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowLeft, Check, Printer } from 'lucide-react';
-import logo from '@botonera/marca/logos/ecologia-misiones-horizontal.svg';
-import flor from '@botonera/marca/logos/flor-lapacho.svg';
-import { Badge } from '@/components/ui/badge';
+import { ChevronDown, FileText, MailCheck } from 'lucide-react';
+import type { TipoSolicitudPublico } from '@botonera/shared';
 import { Button } from '@/components/ui/button';
 import { FloatingInput } from '@/components/watermelon/floating-input';
 import { cn } from '@/lib/utils';
-import Marco from '../../components/Marco';
-import { buscarCertificado, normalizarIdentificador, PRECIO_DEMO, type Certificado } from './demo';
+import { api, ErrorApi, pesos } from './api';
+import { Aviso, Kicker, Pagina, Pasos, Tarjeta } from './comunes';
 
-type Paso = 'buscar' | 'pagar' | 'certificado';
-const pesos = (n: number) => n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
-const fecha = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString('es-AR');
+type Paso = 'tipo' | 'mail' | 'codigo';
 
-const pasos: { id: Paso; nombre: string }[] = [
-  { id: 'buscar', nombre: 'Identificación' },
-  { id: 'pagar', nombre: 'Renovación' },
-  { id: 'certificado', nombre: 'Certificado' },
-];
+const inputClase = 'h-12 bg-white text-base focus:ring-3 focus:ring-rosa-600/20';
 
-function Pasos({ actual }: { actual: Paso }) {
-  const indice = pasos.findIndex((p) => p.id === actual);
+function TarjetaTipo({ tipo, elegir }: { tipo: TipoSolicitudPublico; elegir: () => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const documentos = tipo.requisitos.filter((r) => r.tipo === 'documento');
   return (
-    <ol className="mb-6 grid grid-cols-3 gap-2 print:hidden" aria-label="Pasos del trámite">
-      {pasos.map((p, i) => (
-        <li
-          key={p.id}
-          aria-current={i === indice ? 'step' : undefined}
-          className={cn(
-            'flex flex-col gap-2 border-b-2 pb-3 text-xs sm:flex-row sm:items-center sm:text-sm',
-            i <= indice ? 'border-verde-600 text-verde-700' : 'border-border text-muted-foreground',
-            i === indice && 'font-semibold',
-          )}
-        >
-          <span
-            className={cn(
-              'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-              i < indice ? 'bg-verde-600 text-white' : i === indice ? 'bg-rosa-600 text-white' : 'bg-crema-200 text-muted-foreground',
-            )}
+    <motion.div layout className="flex flex-col rounded-2xl border border-border bg-white p-5 transition-colors hover:border-verde-500">
+      <h3 className="text-lg font-medium text-verde-800">{tipo.nombre}</h3>
+      {tipo.descripcion && <p className="mt-1 text-sm text-muted-foreground">{tipo.descripcion}</p>}
+      <p className="mt-3 text-sm">
+        {tipo.importeCentavos !== null ? (
+          <>
+            Tasa: <strong className="text-verde-700">{pesos(tipo.importeCentavos)}</strong>
+          </>
+        ) : (
+          <span className="text-muted-foreground">La tasa se informa al aprobarse la solicitud.</span>
+        )}
+      </p>
+      <button
+        type="button"
+        onClick={() => setAbierto(!abierto)}
+        aria-expanded={abierto}
+        className="mt-3 inline-flex items-center gap-1 self-start text-sm font-medium text-rosa-600 hover:underline"
+      >
+        {documentos.length} documentos para presentar
+        <ChevronDown className={cn('size-4 transition-transform', abierto && 'rotate-180')} />
+      </button>
+      <AnimatePresence initial={false}>
+        {abierto && (
+          <motion.ul
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="mt-2 flex flex-col gap-1.5 overflow-hidden text-sm"
           >
-            {i < indice ? <Check className="size-4" /> : i + 1}
-          </span>
-          {p.nombre}
-        </li>
-      ))}
-    </ol>
+            {documentos.map((d) => (
+              <li key={d.clave} className="flex items-start gap-2">
+                <FileText className="mt-0.5 size-4 shrink-0 text-verde-600" />
+                {d.etiqueta}
+                {!d.obligatorio && <span className="text-muted-foreground">(opcional)</span>}
+              </li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+      <Button className="mt-5 rounded-lg" onClick={elegir}>
+        Iniciar solicitud
+      </Button>
+    </motion.div>
   );
 }
 
-/** Tarjeta de cada paso, con transición al cambiar. */
-function Tarjeta({ children, k }: { children: ReactNode; k: string }) {
+function Recuperar() {
+  const [email, setEmail] = useState('');
+  const [estado, setEstado] = useState<'idle' | 'enviando' | 'listo' | string>('idle');
+  async function enviar(e: FormEvent) {
+    e.preventDefault();
+    setEstado('enviando');
+    try {
+      await api.recuperar(email);
+      setEstado('listo');
+    } catch (err) {
+      setEstado((err as Error).message);
+    }
+  }
   return (
-    <motion.section
-      key={k}
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-      className="rounded-2xl border border-border bg-white p-5 shadow-[0_1px_2px_rgba(33,19,13,0.06),0_12px_34px_rgba(33,19,13,0.05)] sm:p-8 print:border-0 print:p-0 print:shadow-none"
-    >
-      {children}
-    </motion.section>
+    <section className="mt-10 rounded-2xl border border-dashed border-border p-5 sm:p-6">
+      <h2 className="font-medium text-verde-800">¿Ya iniciaste una solicitud?</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Te mandamos de nuevo los enlaces de tus solicitudes al mail con que las iniciaste.</p>
+      {estado === 'listo' ? (
+        <div className="mt-4">
+          <Aviso tono="ok">Si hay solicitudes con ese mail, en unos minutos te llegan los enlaces.</Aviso>
+        </div>
+      ) : (
+        <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={enviar}>
+          <div className="flex-1">
+            <FloatingInput label="Tu mail" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} labelClassName="bg-crema" className={cn(inputClase, 'bg-transparent')} />
+          </div>
+          <Button type="submit" variant="outline" size="lg" className="h-12 rounded-lg" disabled={estado === 'enviando'}>
+            Reenviar enlaces
+          </Button>
+        </form>
+      )}
+      {!['idle', 'enviando', 'listo'].includes(estado) && <div className="mt-3"><Aviso>{estado}</Aviso></div>}
+    </section>
   );
 }
-
-const Kicker = ({ children }: { children: ReactNode }) => (
-  <span className="text-xs font-semibold tracking-[0.1em] text-rosa-600 uppercase">{children}</span>
-);
 
 export default function Fitosanitarios() {
-  const [identificador, setIdentificador] = useState('');
-  const [titular, setTitular] = useState<Certificado | null>(null);
+  const navigate = useNavigate();
+  const [tipos, setTipos] = useState<TipoSolicitudPublico[] | null>(null);
+  const [errorTipos, setErrorTipos] = useState('');
+  const [paso, setPaso] = useState<Paso>('tipo');
+  const [tipo, setTipo] = useState<TipoSolicitudPublico | null>(null);
+  const [email, setEmail] = useState('');
+  const [codigo, setCodigo] = useState('');
   const [error, setError] = useState('');
-  const [paso, setPaso] = useState<Paso>('buscar');
-  const [nuevo, setNuevo] = useState<Certificado | null>(null);
+  const [ocupado, setOcupado] = useState(false);
 
-  function consultar(event: FormEvent) {
-    event.preventDefault();
-    const id = normalizarIdentificador(identificador);
-    if (id.length !== 8 && id.length !== 11) {
-      setError('Ingresá un DNI de 8 dígitos o un CUIT de 11 dígitos.');
-      setTitular(null);
-      return;
-    }
+  useEffect(() => {
+    api.tipos().then(setTipos, (e: Error) => setErrorTipos(e.message));
+  }, []);
+
+  async function pedirCodigo(e?: FormEvent) {
+    e?.preventDefault();
     setError('');
-    const found = buscarCertificado(id);
-    setTitular(found);
-    if (!found) setError('No encontramos un certificado para ese DNI o CUIT. Revisá el dato o consultá al área de Fitosanitarios.');
+    setOcupado(true);
+    try {
+      await api.pedirCodigo(email);
+      setCodigo('');
+      setPaso('codigo');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setOcupado(false);
+    }
   }
 
-  function pagar() {
-    if (!titular) return;
-    const emitido = new Date();
-    const vence = new Date(emitido);
-    vence.setFullYear(vence.getFullYear() + 1);
-    setNuevo({
-      numero: `FITO-DEMO-${emitido.getFullYear()}-${String(Math.floor(Math.random() * 90000) + 10000)}`,
-      identificador: titular.identificador,
-      titular: titular.titular,
-      actividad: titular.actividad,
-      emitido: emitido.toISOString().slice(0, 10),
-      vence: vence.toISOString().slice(0, 10),
-    });
-    setPaso('certificado');
+  async function crear(e: FormEvent) {
+    e.preventDefault();
+    if (!tipo) return;
+    setError('');
+    setOcupado(true);
+    try {
+      const { token } = await api.crear(email, codigo.trim(), tipo.slug);
+      navigate(`/pagar/fitosanitarios/solicitud/${token}`, { replace: true });
+    } catch (err) {
+      setError(err instanceof ErrorApi ? err.message : 'No pudimos crear la solicitud.');
+      setOcupado(false);
+    }
   }
 
-  function finalizar() {
-    setPaso('buscar');
-    setTitular(null);
-    setNuevo(null);
-    setIdentificador('');
-  }
+  const indice = paso === 'tipo' ? 0 : 1;
 
   return (
-    <Marco>
-      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 print:max-w-none print:p-0">
-        <Link to="/" className="mb-6 inline-flex items-center gap-1.5 text-sm text-verde-700 hover:underline print:hidden">
-          <ArrowLeft className="size-4" /> Inicio
-        </Link>
-        <header className="mb-8 print:hidden">
-          <Kicker>Ministerio de Ecología</Kicker>
-          <h1 className="mt-2 text-3xl leading-tight font-medium tracking-tight text-verde-800 sm:text-4xl">
-            Registro de fitosanitarios y domisanitarios
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Consultá tu certificado y renovalo en línea. Cada certificado tiene validez de un año.
-          </p>
-        </header>
+    <Pagina
+      titulo="Certificado de fitosanitarios y domisanitarios"
+      bajada="Presentá la solicitud en línea. Los técnicos del área la revisan y, cuando la aprueban, te avisamos por mail para que hagas el pago."
+    >
+      <Pasos nombres={['Tipo de certificado', 'Tu mail', 'Requisitos', 'Revisión y pago']} actual={indice} />
 
-        <Pasos actual={paso} />
+      <AnimatePresence mode="wait">
+        {paso === 'tipo' && (
+          <motion.div key="tipo" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <h2 className="mb-1 text-xl font-medium text-verde-800">¿Qué querés habilitar?</h2>
+            <p className="mb-5 text-muted-foreground">Cada tipo pide sus propios datos y documentos. Tené a mano los archivos en PDF, JPG o PNG.</p>
+            {errorTipos && <Aviso>{errorTipos}</Aviso>}
+            {!tipos && !errorTipos && <p className="text-muted-foreground">Cargando…</p>}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {tipos?.map((t) => (
+                <TarjetaTipo
+                  key={t.slug}
+                  tipo={t}
+                  elegir={() => {
+                    setTipo(t);
+                    setPaso('mail');
+                  }}
+                />
+              ))}
+            </div>
+            <Recuperar />
+          </motion.div>
+        )}
 
-        <AnimatePresence mode="wait">
-          {paso === 'buscar' && (
-            <Tarjeta k="buscar">
-              <h2 className="text-xl font-medium text-verde-800">Buscá tu último certificado</h2>
-              <p className="mt-1 text-muted-foreground">Usá el DNI de la persona titular o el CUIT de la empresa.</p>
-              <form className="mt-6 flex flex-col gap-3 sm:flex-row" onSubmit={consultar}>
-                <div className="flex-1">
-                  <FloatingInput
-                    label="DNI o CUIT"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={identificador}
-                    onChange={(event) => setIdentificador(event.target.value)}
-                    labelClassName="bg-white"
-                    className="h-12 bg-white text-base focus:ring-3 focus:ring-rosa-600/20"
-                  />
-                </div>
-                <Button type="submit" size="lg" className="h-12 rounded-lg px-6">
-                  Buscar certificado
-                </Button>
-              </form>
-              <p className="mt-2 text-xs text-muted-foreground">Ej.: 20345678901</p>
-
-              {error && (
-                <p role="alert" className="mt-4 rounded-lg bg-destructive/8 px-4 py-3 text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-
-              {titular && (
-                <div className="mt-6 border-t border-border pt-6">
-                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-                    <div>
-                      <Kicker>Último certificado</Kicker>
-                      <h3 className="mt-1 text-lg font-medium">{titular.titular}</h3>
-                    </div>
-                    <Badge className="bg-ok/10 text-ok">Registro encontrado</Badge>
-                  </div>
-                  <dl className="my-5 grid gap-4 sm:grid-cols-2">
-                    {[
-                      ['Número', titular.numero],
-                      ['DNI / CUIT', titular.identificador],
-                      ['Actividad habilitada', titular.actividad],
-                      ['Vencimiento', fecha(titular.vence)],
-                    ].map(([dt, dd]) => (
-                      <div key={dt} className="min-w-0">
-                        <dt className="text-xs text-muted-foreground">{dt}</dt>
-                        <dd className="mt-0.5 font-medium">{dd}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <Button size="lg" className="rounded-lg" onClick={() => setPaso('pagar')}>
-                    Renovar certificado
-                  </Button>
-                </div>
-              )}
-            </Tarjeta>
-          )}
-
-          {paso === 'pagar' && titular && (
-            <Tarjeta k="pagar">
-              <Kicker>Renovación anual</Kicker>
-              <h2 className="mt-1 text-xl font-medium text-verde-800">Confirmá el pago</h2>
-              <div className="my-6 flex items-center justify-between gap-4 border-y border-border py-5">
-                <span>Certificado de fitosanitarios y domisanitarios</span>
-                <strong className="text-xl whitespace-nowrap text-verde-700">{pesos(PRECIO_DEMO)}</strong>
+        {paso === 'mail' && tipo && (
+          <Tarjeta k="mail">
+            <Kicker>{tipo.nombre}</Kicker>
+            <h2 className="mt-1 text-xl font-medium text-verde-800">¿A qué mail te avisamos?</h2>
+            <p className="mt-1 text-muted-foreground">
+              No hace falta crear una cuenta. Te mandamos un código para confirmar que el mail es tuyo; ahí te van a llegar las novedades y el enlace para seguir la solicitud.
+            </p>
+            <form className="mt-6 flex flex-col gap-3 sm:flex-row" onSubmit={pedirCodigo}>
+              <div className="flex-1">
+                <FloatingInput label="Mail" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} labelClassName="bg-white" className={inputClase} />
               </div>
-              <p className="text-sm text-muted-foreground">El nuevo certificado tendrá vigencia por un año desde la fecha de emisión.</p>
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Button variant="outline" size="lg" className="rounded-lg" onClick={() => setPaso('buscar')}>
-                  Volver
-                </Button>
-                <Button size="lg" className="rounded-lg" onClick={pagar}>
-                  Pagar (simulación)
-                </Button>
+              <Button type="submit" size="lg" className="h-12 rounded-lg px-6" disabled={ocupado}>
+                Enviar código
+              </Button>
+            </form>
+            {error && <div className="mt-4"><Aviso>{error}</Aviso></div>}
+            <Button variant="link" className="mt-4 px-0 text-verde-700" onClick={() => setPaso('tipo')}>
+              Elegir otro tipo
+            </Button>
+          </Tarjeta>
+        )}
+
+        {paso === 'codigo' && tipo && (
+          <Tarjeta k="codigo">
+            <span className="mb-4 flex size-12 items-center justify-center rounded-full bg-crema-200 text-verde-600">
+              <MailCheck className="size-6" />
+            </span>
+            <h2 className="text-xl font-medium text-verde-800">Revisá tu mail</h2>
+            <p className="mt-1 text-muted-foreground">
+              Te mandamos un código de 6 números a <strong className="text-foreground">{email}</strong>. Vence en 15 minutos. Si no lo ves, buscá en spam.
+            </p>
+            <form className="mt-6 flex flex-col gap-3 sm:flex-row" onSubmit={crear}>
+              <div className="flex-1">
+                <FloatingInput
+                  label="Código"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  required
+                  value={codigo}
+                  onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
+                  labelClassName="bg-white"
+                  className={cn(inputClase, 'tracking-[0.4em]')}
+                />
               </div>
-              <p className="mt-4 text-sm text-muted-foreground">Demostración: no se realiza ningún cobro. El precio mostrado es ilustrativo.</p>
-            </Tarjeta>
-          )}
-
-          {paso === 'certificado' && nuevo && (
-            <Tarjeta k="certificado">
-              <div className="mb-6 flex items-center gap-3 print:hidden">
-                <span className="flex size-10 items-center justify-center rounded-full bg-ok/12 text-ok">
-                  <Check className="size-5" />
-                </span>
-                <div>
-                  <h2 className="text-xl font-medium text-verde-800">Certificado emitido</h2>
-                  <p className="text-sm text-muted-foreground">El pago de demostración fue aprobado.</p>
-                </div>
-              </div>
-
-              <article
-                aria-label="Certificado de ejemplo"
-                className="relative overflow-hidden rounded-xl border-2 border-verde-600/40 bg-linear-to-br from-white to-crema px-6 py-8 text-center sm:px-12 print:min-h-[90vh] print:[print-color-adjust:exact]"
-              >
-                <img src={flor} alt="" aria-hidden="true" className="pointer-events-none absolute -top-8 -right-8 size-32 opacity-20" />
-                <div className="flex items-center justify-between gap-3 text-[0.65rem] font-semibold tracking-[0.08em] text-verde-700">
-                  <span>MINISTERIO DE ECOLOGÍA Y RNR</span>
-                  <span>REGISTRO PROVINCIAL</span>
-                </div>
-                <img src={logo} alt="Ecología Misiones" className="mx-auto mt-8 mb-6 h-16 w-auto" />
-                <Kicker>Certificado de habilitación</Kicker>
-                <h2 className="mt-1 mb-6 text-2xl font-medium text-verde-800">Fitosanitarios y domisanitarios</h2>
-                <p className="text-muted-foreground">Se certifica que</p>
-                <h3 className="my-2 text-2xl font-semibold">{nuevo.titular}</h3>
-                <p>
-                  DNI / CUIT: <strong>{nuevo.identificador}</strong>
-                </p>
-                <p className="mt-1">
-                  se encuentra habilitado para <strong>{nuevo.actividad.toLowerCase()}</strong>.
-                </p>
-                <div className="my-8 flex justify-center gap-10 sm:gap-16">
-                  {[
-                    ['EMITIDO', nuevo.emitido],
-                    ['VÁLIDO HASTA', nuevo.vence],
-                  ].map(([l, v]) => (
-                    <div key={l} className="flex flex-col gap-1">
-                      <span className="text-[0.65rem] tracking-[0.08em] text-muted-foreground">{l}</span>
-                      <strong className="text-verde-800">{fecha(v)}</strong>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-between gap-3 border-t border-border pt-3 text-[0.62rem] font-semibold tracking-[0.08em] text-verde-700">
-                  <span>N.º {nuevo.numero}</span>
-                  <span>Documento de demostración</span>
-                </div>
-              </article>
-
-              <div className="mt-6 flex flex-wrap gap-3 print:hidden">
-                <Button size="lg" className="rounded-lg" onClick={() => window.print()}>
-                  <Printer /> Imprimir / Guardar como PDF
-                </Button>
-                <Button variant="outline" size="lg" className="rounded-lg" onClick={finalizar}>
-                  Finalizar
-                </Button>
-              </div>
-              <p className="mt-4 text-sm text-muted-foreground print:hidden">
-                Este certificado es una maqueta. El formato oficial y la integración con el pago se definirán durante el relevamiento.
-              </p>
-            </Tarjeta>
-          )}
-        </AnimatePresence>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground print:hidden">Versión de demostración · Los datos y el pago son ficticios.</p>
-      </main>
-    </Marco>
+              <Button type="submit" size="lg" className="h-12 rounded-lg px-6" disabled={ocupado || codigo.length !== 6}>
+                Verificar y empezar
+              </Button>
+            </form>
+            {error && <div className="mt-4"><Aviso>{error}</Aviso></div>}
+            <div className="mt-4 flex flex-wrap gap-x-4">
+              <Button variant="link" className="px-0 text-verde-700" onClick={() => pedirCodigo()} disabled={ocupado}>
+                Mandar otro código
+              </Button>
+              <Button variant="link" className="px-0 text-verde-700" onClick={() => setPaso('mail')}>
+                Cambiar el mail
+              </Button>
+            </div>
+          </Tarjeta>
+        )}
+      </AnimatePresence>
+    </Pagina>
   );
 }

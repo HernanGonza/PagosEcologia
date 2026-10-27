@@ -8,6 +8,7 @@ const requisitos: Record<TramiteAdmin['requisito'], string> = {
   ninguno: 'Libre',
   registro: 'Tiene que figurar en un registro',
   deuda: 'Tiene que existir una deuda',
+  revision: 'Lo aprueban los técnicos del área',
   sin_configurar: 'Sin configurar',
 };
 

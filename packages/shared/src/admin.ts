@@ -62,7 +62,7 @@ export interface TramiteAdmin {
   tipo: string;
   activo: boolean;
   /** Qué tiene que existir para dejar pagar (de `config.requisito`). */
-  requisito: 'ninguno' | 'registro' | 'deuda' | 'sin_configurar';
+  requisito: 'ninguno' | 'registro' | 'deuda' | 'revision' | 'sin_configurar';
   /** Datos que pide el trámite (de `config.campos`). */
   campos: string[];
   conceptos: {

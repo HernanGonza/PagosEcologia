@@ -39,7 +39,9 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 - El front nunca habla con Supabase: todo pasa por la API. El schema no se expone en PostgREST y tiene RLS activado por prevención.
 - Las credenciales no están en el repo. Cada quien arma su `.env` a partir de `.env.example` y las pide al dueño del proyecto.
 - Las migraciones de `db/migrations/` las corre el dueño del proyecto con `npm run migrate` (rol `postgres`, `MIGRATIONS_DATABASE_URL`). Quedan registradas en `pagos._migraciones`.
-- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` solo lee `fitosanitarios_domisanitarios` / `tipos_fito_domi` y actualiza `anio_pago_registro`.
+- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` solo lee `fitosanitarios_domisanitarios` / `tipos_fito_domi` y actualiza `anio_pago_registro`. También lee las tablas de permisos de Ecodatos (`areas`, `formularios`, `usuarios_areas`, `usuarios_formularios`, `roles`, `usuarios_rol`, `profiles`) para saber quién entra a cada panel de área (`0006_permisos_ecodatos.sql`).
+- **Storage:** los documentos de las solicitudes van a buckets privados del mismo Supabase (`fitosanitarios`, creado en `0005`). Solo la API sube y firma enlaces, con `SUPABASE_SERVICE_ROLE_KEY`; esa clave nunca va a un front.
+- **Auth:** los paneles de área (`apps/paneles`) usan el login de Ecodatos (Supabase Auth, mail y contraseña) con la anon key, que es pública. La API valida cada token contra Supabase y calcula los permisos.
 
 ## 🏗️ Arquitectura
 
@@ -61,6 +63,8 @@ botonera-pagos/
 │  ├─ web/            botonera pública: home + /pagar/<slug>
 │  │  └─ src/modules/<slug>/   pantalla de cada trámite
 │  ├─ admin/          panel de Recaudaciones
+│  ├─ paneles/        paneles de área (técnicos), con el login de Ecodatos
+│  │  └─ src/modules/<slug>/   panel de cada trámite que lo necesita
 │  ├─ api/            Node + Express + TypeScript
 │  │  └─ src/modules/<slug>/   endpoints de cada trámite
 │  └─ relevamiento/   herramienta local de relevamiento
@@ -71,7 +75,7 @@ botonera-pagos/
 ```
 
 - Monorepo con npm workspaces. **Todos los módulos viven en este mismo repo**, no hay un repo por módulo: el back en `apps/api/src/modules/<slug>/` y, si es complejo, su componente en `apps/web/src/modules/<slug>/`.
-- El panel de Recaudaciones es una app aparte (`apps/admin`).
+- El panel de Recaudaciones es una app aparte (`apps/admin`). Los paneles de cada área (los técnicos que revisan solicitudes) son otra (`apps/paneles`): ver [Paneles de área](#-paneles-de-área-appspaneles).
 - Backend: `core/` (pagos, comprobantes, auth, proveedor de pago) y una carpeta `modules/<slug>/` por proceso, con su definición, resolver de deuda, validaciones y hooks.
 - Front: la home dibuja los botones desde `apps/web/src/modules/registry.ts` y cada `/pagar/<slug>` tiene su pantalla. Más adelante, la home va a leer `GET /api/modulos` y los trámites simples van a usar un formulario generado desde la config.
 
@@ -132,6 +136,7 @@ Guía para sumar un trámite a la botonera. El ejemplo de referencia es `fitosan
 | 5 | `apps/web/src/modules/registry.ts` | Ficha del botón en la home | Sí |
 | 6 | `apps/web/src/main.tsx` | Ruta `/pagar/<slug>` | Sí |
 | 7 | `packages/shared/src/` | Tipos que comparten front y back | Si hace falta |
+| 8 | `apps/paneles/src/modules/<slug>/` + `config.panel` | Panel del área que revisa las solicitudes | Solo si el trámite tiene revisión técnica |
 | — | `apps/admin` | **Nada.** El panel lo toma solo de la base | — |
 
 ### El slug
@@ -330,6 +335,17 @@ Si el front y el back intercambian una forma de datos propia del módulo (la res
 
 Si un concepto no tiene tarifa cargada, el panel lo muestra como **"Sin valor: el trámite no puede cobrar"**. Así se nota que falta cargar el valor.
 
+### Paso 5b · Panel del área (solo si los técnicos revisan)
+
+Si el trámite necesita que alguien del área apruebe antes del pago (requisito `{ "tipo": "revision" }`), lleva su panel en `apps/paneles`:
+
+1. En la `config` del módulo, decí quién entra con los permisos de Ecodatos: `"panel": { "formularios": ["<slug del formulario en Ecodatos>"], "areas": ["<key del área>"] }`. Entra quien tenga alguno asignado, o sea admin de Ecodatos. Con `es_editor = false` ve pero no actúa.
+2. En la API, los endpoints del panel van en `apps/api/src/modules/<slug>/panel.ts`, protegidos con `requierePanel('<slug>')` (lectura) y `requierePanel('<slug>', { edicion: true })` (acciones) de `core/auth-ecodatos.ts`.
+3. En la API, registrá el contador del badge: `registrarPendientes('<slug>', async () => /* cantidad sin tomar */)`.
+4. En el front, la carpeta `apps/paneles/src/modules/<slug>/` (con sus subrutas) y su entrada en `apps/paneles/src/modules/registry.ts` (componente, ícono y descripción de la tarjeta). El inicio, el login y el menú lo resuelven solos.
+
+Fitosanitarios es el ejemplo completo: `solicitudes.ts`, `publico.ts` y `panel.ts` en la API.
+
 ### Paso 6 · Probar
 
 ```bash
@@ -502,6 +518,33 @@ Reglas:
 
 > ❓ A definir con Recaudaciones: formato de los reportes, cómo concilian hoy, si hace falta aprobación de un segundo usuario para cambiar un monto, y qué indicadores quieren ver primero.
 
+## 📝 Solicitudes con revisión técnica
+
+Para trámites donde el área controla requisitos antes de cobrar (hoy, fitosanitarios). **La persona no crea cuenta:**
+
+1. Elige el tipo (vehículo, comercio, depósito…), pone su mail y confirma un código de 6 dígitos (vale 15 min, 5 intentos; máximo 5 códigos por mail y 20 por IP por hora).
+2. Se crea la solicitud con un **enlace privado** (`/pagar/fitosanitarios/solicitud/<token>`) que le llega por mail. En la base se guarda el hash del token para buscarlo y el token cifrado (`SOLICITUDES_SECRETO`) para reenviar el enlace en los avisos. Si lo pierde, lo pide de nuevo con su mail.
+3. Carga datos y documentos (PDF, JPG o PNG, hasta 10 MB; el tipo se comprueba por contenido). No puede enviar hasta cumplir todos los requisitos.
+4. Los técnicos la ven en su panel: la **toman**, la **aprueban**, la **observan** (por requisito o en general) o la **rechazan** con un motivo. Cada acción le avisa por mail y queda en el historial y en la auditoría.
+5. Si está observada, corrige lo marcado y la reenvía. Aprobada, tiene `aprobacionDias` (30) para pagar; si no, vence.
+
+Estados: `borrador` → `enviada` → `en_revision` → `observada` / `aprobada` / `rechazada`; después `pagada` → `emitida`, o `vencida`. Los tipos, requisitos y plazos están en `modulos.config.solicitud` (ver `packages/shared/src/solicitudes.ts`); las reglas de validación son las mismas en el front y en el back.
+
+**Mail:** `apps/api/src/core/correo.ts` manda por Gmail (`GMAIL_USER`/`GMAIL_APP_PASSWORD`) o Microsoft Graph (`MS_*`, `MAIL_FROM`), igual que mapa-pronostico. Con `MAIL_PROVIDER=consola` los mails solo se muestran en el log de la API (desarrollo).
+
+## 🧑‍🔬 Paneles de área (`apps/paneles`)
+
+Otro front, separado del de Recaudaciones: cada módulo que lo necesita tiene su panel, y entran los técnicos del área **con su usuario de Ecodatos**.
+
+- Login con Supabase Auth de Ecodatos (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`). La contraseña se recupera desde Ecodatos.
+- `GET /api/paneles/yo` devuelve la persona y los paneles a los que entra, según `config.panel` de cada módulo y sus permisos en Ecodatos.
+- **Inicio:** una tarjeta por panel, con un badge de solicitudes nuevas (sin tomar) que también aparece en el menú. Sale de `GET /api/paneles/pendientes`; cada módulo registra su contador con `registrarPendientes(slug, fn)` (`apps/api/src/routes/paneles.ts`). Se actualiza cada minuto, al volver a la pestaña y después de cada acción.
+- **Trazabilidad:** queda registrado quién tomó la solicitud y cuándo (`revisor_*`, `tomada_en`) y quién la aprobó o rechazó (`resuelta_por_*`, `resuelta_en`), aunque sean personas distintas. Cada paso del historial guarda nombre, mail, IP, fecha y hora; cada observación, su autor; y cada acción va además a `pagos.auditoria`. Si alguien aprueba, observa o rechaza sin tomarla antes, la toma en ese momento.
+- Fitosanitarios: listado por estado (Pendientes, En revisión, Observadas, Aprobadas, Rechazadas), búsqueda por número, titular, CUIT o mail; detalle con los datos, los documentos, observaciones, historial y las acciones.
+- **Documentos:** se ven en un visor dentro del panel (PDF embebido, imágenes con zoom, flechas para pasar de uno a otro, descarga), sin abrir pestañas. Se bajan con enlaces firmados de 10 minutos; si vencen, el visor los renueva solo.
+- **Confirmaciones:** tomar, aprobar, observar, rechazar y salir se confirman con SweetAlert2 (`src/lib/alertas.ts`, con los estilos de la marca), y cada acción muestra el resultado.
+- Hoy entran las 6 personas con el formulario `fitosanitarios_domisanitarios` en Ecodatos. Para abrirlo a toda el área de Control Ambiental, sumar `"areas": ["control_ambiental"]` en `config.panel`.
+
 ## 💰 Proveedor de pago: MacroClick
 
 - Aislado en `apps/api/src/core/payments/macroclick.ts`.
@@ -514,11 +557,10 @@ El catálogo genérico de ejemplo se retiró para empezar el primer módulo con 
 
 - `/`: botonera de entrada con buscador y tarjetas para los módulos registrados en `apps/web/src/modules/registry.ts`.
 - `/pagar/fitosanitarios`: módulo propio de Registro de fitosanitarios y domisanitarios. Cada trámite conserva su flujo dentro de su carpeta y aporta una ficha a la botonera.
-- La pantalla permite buscar por DNI/CUIT, ver el último certificado y su vencimiento, simular una renovación anual y mostrar una maqueta imprimible/guardable como PDF.
-- Los registros de prueba y el precio ilustrativo están aislados en `apps/web/src/modules/fitosanitarios/demo.ts`. No son datos reales ni se usan para cobrar.
-- API propia: `GET /api/fitosanitarios/certificados/:identificador` y `GET /api/fitosanitarios/tarifa`.
-- Migraciones: `0001_pagos_base.sql` (núcleo), `0002_fitosanitarios.sql` (renovaciones; el registro se lee de `public.fitosanitarios_domisanitarios`), `0003_rol_botonera.sql` (rol de la API), `0004_config_fitosanitarios.sql` (config según `ConfigModulo`). Falta que el área agregue DNI/CUIT y vencimiento en el registro.
-- El pago todavía no está integrado a MacroClick ni crea certificados persistentes; el circuito público sigue siendo una demostración.
+- La pantalla muestra los tipos de certificado con sus requisitos e importe, pide el mail con código de verificación y lleva a la solicitud (ver [Solicitudes con revisión técnica](#-solicitudes-con-revisión-técnica)). Los técnicos la revisan en `apps/paneles`.
+- API propia: `/api/fitosanitarios/tipos`, `/codigo`, `/solicitudes/...` (persona, con su enlace privado) y `/api/fitosanitarios/panel/...` (técnicos, con sesión de Ecodatos).
+- Migraciones: `0001_pagos_base.sql` (núcleo), `0002_fitosanitarios.sql` (renovaciones; el registro se lee de `public.fitosanitarios_domisanitarios`), `0003_rol_botonera.sql` (rol de la API), `0004_config_fitosanitarios.sql` (config según `ConfigModulo`), `0005_solicitudes_fitosanitarios.sql` (solicitudes, documentos, observaciones, historial, códigos de verificación, bucket `fitosanitarios` y tipos y requisitos provisorios), `0006_permisos_ecodatos.sql` (lectura de los permisos de Ecodatos), `0007_revision_trazabilidad.sql` (quién tomó y quién resolvió cada solicitud; mail e IP en el historial). Falta que el área agregue DNI/CUIT y vencimiento en el registro.
+- El pago todavía no está integrado a MacroClick ni emite certificados: la solicitud aprobada muestra el botón de pago deshabilitado.
 
 ### 📊 Panel de Recaudaciones (`apps/admin`)
 
@@ -544,11 +586,16 @@ cp .env.example .env     # completar DATABASE_URL (solo si se usa la API)
 npm run dev:web          # front
 npm run dev:api          # API (requiere DATABASE_URL)
 npm run dev:admin        # panel de Recaudaciones → http://localhost:5174 (requiere ADMIN_SIN_LOGIN=true en .env)
+npm run dev:paneles      # paneles de área → http://localhost:5176 (login de Ecodatos)
 ```
+
+Para las solicitudes, el `.env` necesita además `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SOLICITUDES_SECRETO` y el mail (o `MAIL_PROVIDER=consola`). Está todo explicado en `.env.example`.
 
 ## ✅ Pendiente del módulo fitosanitarios
 
 - Relevar campos y estados oficiales del registro, cómo se determina la habilitación y el formato del certificado.
+- Confirmar los tipos de certificado, sus requisitos, tasas y plazos (las preguntas están en el relevamiento, sección 7). Los de `0005` son provisorios.
+- Avisar a los técnicos cuando entra una solicitud nueva (hoy la ven al entrar al panel).
 - Importar y depurar el Excel de titulares y certificados en las tablas propias mediante un proceso controlado.
 - Configurar la tarifa oficial desde administración y conectar el importe calculado por API con una orden de pago.
 - Confirmar pago con el proveedor y emitir/guardar el certificado definitivo de un año.
