@@ -6,7 +6,12 @@
  *   SUPABASE_URL               dirección pública (la de los enlaces firmados que abre el navegador)
  *   SUPABASE_INTERNAL_URL      opcional: por dónde la API le habla a Supabase dentro de la red
  *   SUPABASE_SERVICE_ROLE_KEY  clave de servicio; solo en el .env de la API, nunca en un front
+ *   STORAGE_LOCAL_DIR          solo desarrollo sin red: guarda en esta carpeta en vez de Supabase
+ *                              y los enlaces apuntan a /api/dev-storage (ver server.ts)
  */
+
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 const env = (k: string) => (process.env[k] ?? '').trim().replace(/\/+$/, '');
 const base = () => env('SUPABASE_URL');
@@ -15,7 +20,17 @@ const clave = () => (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
 
 export class ErrorStorage extends Error {}
 
-export const storageConfigurado = () => !!(base() && clave());
+export const storageLocalDir = () => (process.env.STORAGE_LOCAL_DIR ?? '').trim();
+
+/** Ruta dentro de la carpeta local; rechaza cualquier intento de salirse de ella. */
+export function rutaLocal(bucket: string, ruta: string): string {
+  const raiz = path.resolve(storageLocalDir());
+  const destino = path.resolve(raiz, bucket, ruta);
+  if (!destino.startsWith(path.join(raiz, bucket) + path.sep)) throw new ErrorStorage('Ruta de archivo inválida.');
+  return destino;
+}
+
+export const storageConfigurado = () => !!storageLocalDir() || !!(base() && clave());
 
 function encabezados(extra: Record<string, string> = {}) {
   if (!storageConfigurado()) throw new ErrorStorage('Storage no está configurado: falta SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY.');
@@ -26,6 +41,12 @@ function encabezados(extra: Record<string, string> = {}) {
 const rutaCodificada = (ruta: string) => ruta.split('/').map(encodeURIComponent).join('/');
 
 export async function subirArchivo(bucket: string, ruta: string, contenido: Buffer, tipoMime: string): Promise<void> {
+  if (storageLocalDir()) {
+    const destino = rutaLocal(bucket, ruta);
+    await mkdir(path.dirname(destino), { recursive: true });
+    await writeFile(destino, contenido);
+    return;
+  }
   const res = await fetch(`${baseInterna()}/storage/v1/object/${encodeURIComponent(bucket)}/${rutaCodificada(ruta)}`, {
     method: 'POST',
     headers: encabezados({ 'Content-Type': tipoMime }),
@@ -37,6 +58,7 @@ export async function subirArchivo(bucket: string, ruta: string, contenido: Buff
 
 /** Enlace firmado para ver un archivo durante `segundos`. */
 export async function enlaceFirmado(bucket: string, ruta: string, segundos = 600): Promise<string> {
+  if (storageLocalDir()) return `/api/dev-storage/${encodeURIComponent(bucket)}/${rutaCodificada(ruta)}`;
   const res = await fetch(`${baseInterna()}/storage/v1/object/sign/${encodeURIComponent(bucket)}/${rutaCodificada(ruta)}`, {
     method: 'POST',
     headers: encabezados({ 'Content-Type': 'application/json' }),
@@ -51,6 +73,11 @@ export async function enlaceFirmado(bucket: string, ruta: string, segundos = 600
 
 /** Descarga un archivo (para que la persona vea lo que subió, a través de la API). */
 export async function descargarArchivo(bucket: string, ruta: string): Promise<Response> {
+  if (storageLocalDir()) {
+    const contenido = await readFile(rutaLocal(bucket, ruta)).catch(() => null);
+    if (!contenido) throw new ErrorStorage('Storage respondió 404 al descargar.');
+    return new Response(new Uint8Array(contenido), { headers: { 'Content-Type': tipoPorContenido(contenido) ?? 'application/octet-stream' } });
+  }
   const res = await fetch(`${baseInterna()}/storage/v1/object/${encodeURIComponent(bucket)}/${rutaCodificada(ruta)}`, {
     headers: encabezados(),
     signal: AbortSignal.timeout(60_000),

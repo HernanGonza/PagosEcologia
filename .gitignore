@@ -10,3 +10,6 @@ apps/relevamiento/data/
 # Config local de Serena
 .serena/project.local.yml
 
+
+# Base local de pruebas (npm run db:local) y archivos del storage local
+/.local/

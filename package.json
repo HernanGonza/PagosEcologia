@@ -6,13 +6,15 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:api": "npm run dev -w @botonera/api",
+    "dev:api": "node scripts/dev.mjs api",
     "dev:relevamiento": "npm run dev -w @botonera/relevamiento",
-    "dev:web": "npm run dev -w @botonera/web",
+    "dev:web": "node scripts/dev.mjs web",
     "build": "npm run build -w @botonera/web && npm run build -w @botonera/admin && npm run build -w @botonera/paneles && npm run build -w @botonera/api",
     "migrate": "npm run migrate -w @botonera/api",
     "clave-botonera": "npm run clave-botonera -w @botonera/api",
-    "dev:admin": "npm run dev -w @botonera/admin",
-    "dev:paneles": "npm run dev -w @botonera/paneles"
+    "dev:admin": "node scripts/dev.mjs admin",
+    "dev:paneles": "node scripts/dev.mjs paneles",
+    "dev": "node scripts/dev.mjs",
+    "db:local": "node scripts/db-local.mjs"
   }
 }

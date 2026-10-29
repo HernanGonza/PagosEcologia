@@ -1,4 +1,14 @@
-import type { SolicitudPublica, TipoSolicitudPublico } from '@botonera/shared';
+import type { EstadoSolicitud, SolicitudPublica, TipoSolicitudPublico } from '@botonera/shared';
+
+/** Solicitud en curso de un mail, que se muestra antes de abrir otra. */
+export interface SolicitudExistente {
+  token: string;
+  numero: string;
+  tipo: string;
+  tipoNombre: string;
+  estado: EstadoSolicitud;
+  actualizadaEn: string;
+}
 
 const BASE = '/api/fitosanitarios';
 
@@ -29,8 +39,8 @@ const json = (cuerpo: unknown): RequestInit => ({
 export const api = {
   tipos: () => pedir<TipoSolicitudPublico[]>('/tipos'),
   pedirCodigo: (email: string) => pedir<{ ok: true }>('/codigo', json({ email })),
-  crear: (email: string, codigo: string, tipo: string) =>
-    pedir<{ token: string; numero: string }>('/solicitudes', json({ email, codigo, tipo })),
+  crear: (email: string, codigo: string, tipo: string, nueva = false) =>
+    pedir<{ token: string; numero: string } | { existentes: SolicitudExistente[] }>('/solicitudes', json({ email, codigo, tipo, nueva })),
   recuperar: (email: string) => pedir<{ ok: true }>('/recuperar', json({ email })),
   solicitud: (token: string) => pedir<SolicitudPublica>(`/solicitudes/${token}`),
   guardarDatos: (token: string, datos: Record<string, string>) =>

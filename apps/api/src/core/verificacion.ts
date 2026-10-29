@@ -40,8 +40,12 @@ export async function pedirCodigo(email: string, proposito: string, ip: string):
   return { ok: true, codigo };
 }
 
-/** Verifica y consume el código. Solo vale el último pedido vigente para ese mail y propósito. */
-export async function verificarCodigo(email: string, proposito: string, codigo: string): Promise<boolean> {
+/**
+ * Verifica el código y, por defecto, lo consume. Solo vale el último pedido vigente para ese mail
+ * y propósito. Con `consumir: false` lo comprueba pero sigue vigente (ej. para mostrar algo antes
+ * de seguir); un código equivocado cuenta como intento igual.
+ */
+export async function verificarCodigo(email: string, proposito: string, codigo: string, { consumir = true } = {}): Promise<boolean> {
   if (!/^\d{6}$/.test(codigo)) return false;
   const { rows } = await pool.query<{ id: string; codigo_hash: string; intentos: number }>(
     `select id, codigo_hash, intentos from pagos.verificaciones_email
@@ -54,6 +58,7 @@ export async function verificarCodigo(email: string, proposito: string, codigo: 
   const esperado = Buffer.from(v.codigo_hash, 'hex');
   const recibido = Buffer.from(hash(v.id, codigo), 'hex');
   const ok = esperado.length === recibido.length && timingSafeEqual(esperado, recibido);
+  if (ok && !consumir) return true;
   await pool.query(
     ok
       ? 'update pagos.verificaciones_email set usado_en = now() where id = $1'

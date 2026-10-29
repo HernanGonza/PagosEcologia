@@ -95,16 +95,44 @@ publicoRouter.post('/codigo', async (req, res, next) => {
   }
 });
 
-/** Paso 2: con el código correcto se crea la solicitud y se entrega el enlace privado. */
+/**
+ * Paso 2: con el código correcto se crea la solicitud y se entrega el enlace privado.
+ * Si ese mail ya tiene solicitudes en curso, antes de crear otra se las devuelve (`existentes`,
+ * con su enlace: el código ya probó que el mail es de quien pregunta) y el código sigue vigente.
+ * Para crear igual, el front repite el pedido con `nueva: true`.
+ */
 publicoRouter.post('/solicitudes', async (req, res, next) => {
   try {
     const email = normalizarEmail(String(req.body?.email ?? ''));
     const codigo = String(req.body?.codigo ?? '').trim();
     const tipo = String(req.body?.tipo ?? '');
+    const nueva = req.body?.nueva === true;
     const config = await configModulo();
     await tipoPublico(config, tipo); // valida que el tipo exista
-    if (!emailValido(email) || !(await verificarCodigo(email, PROPOSITO_CODIGO, codigo))) {
+    const { rows: enCurso } = emailValido(email)
+      ? await pool.query<{ numero: string; token_cifrado: string; tipo: string; estado: string; updated_at: Date }>(
+          `select numero, token_cifrado, tipo, estado, updated_at from pagos.fito_solicitudes
+            where lower(email) = $1 and estado not in ('emitida','rechazada','vencida')
+            order by created_at desc limit 10`,
+          [email],
+        )
+      : { rows: [] };
+    const consumir = nueva || !enCurso.length;
+    if (!emailValido(email) || !(await verificarCodigo(email, PROPOSITO_CODIGO, codigo, { consumir }))) {
       throw new ErrorSolicitud(400, 'El código no es correcto o ya venció. Pedí uno nuevo.');
+    }
+    if (!consumir) {
+      res.json({
+        existentes: enCurso.map((r) => ({
+          token: descifrar(r.token_cifrado),
+          numero: r.numero,
+          tipo: r.tipo,
+          tipoNombre: config.solicitud.tipos.find((t) => t.slug === r.tipo)?.nombre ?? r.tipo,
+          estado: r.estado,
+          actualizadaEn: r.updated_at,
+        })),
+      });
+      return;
     }
     const token = nuevoToken();
     const s = await enTransaccion(async (client) => {

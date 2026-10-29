@@ -11,7 +11,10 @@ import type { YoPanel } from '@botonera/shared';
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export const supabaseConfigurado = !!(url && anon);
+// Solo desarrollo sin red: sin login, la API deja entrar a todos (AUTH_LOCAL en el .env).
+const authLocal = import.meta.env.VITE_AUTH_LOCAL === 'true';
+
+export const supabaseConfigurado = authLocal || !!(url && anon);
 const supabase = supabaseConfigurado ? createClient(url!, anon!, { auth: { storageKey: 'paneles.sesion' } }) : null;
 
 /** Token vigente (Supabase lo renueva solo). */
@@ -74,6 +77,10 @@ export function SesionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (authLocal) {
+      cargarPermisos({} as Session);
+      return;
+    }
     if (!supabase) return setEstado({ tipo: 'sin-sesion' });
     supabase.auth.getSession().then(({ data }) => cargarPermisos(data.session));
     const { data } = supabase.auth.onAuthStateChange((evento, sesion) => {

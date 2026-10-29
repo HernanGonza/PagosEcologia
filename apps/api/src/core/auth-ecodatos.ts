@@ -9,6 +9,8 @@
  *
  *   SUPABASE_URL / SUPABASE_INTERNAL_URL  (ver core/storage.ts)
  *   SUPABASE_ANON_KEY                     clave pública de Supabase, la misma que usa el panel
+ *   AUTH_LOCAL=true                       solo desarrollo sin red: no hay login, todos entran como el
+ *                                         usuario de pruebas de la base local (db/local/ecodatos-stub.sql)
  */
 import type { NextFunction, Request, Response } from 'express';
 import type { ConfigPanel, ModuloPanel, UsuarioPanel } from '@botonera/shared';
@@ -26,6 +28,11 @@ declare module 'express-serve-static-core' {
     sesionPanel?: SesionPanel;
   }
 }
+
+/** El bypass solo vale contra una base en esta misma máquina: jamás contra Ecodatos. */
+const authLocal = () => process.env.AUTH_LOCAL === 'true' && /@(127\.0\.0\.1|localhost)[:/]/.test(process.env.DATABASE_URL ?? '');
+
+const USUARIO_LOCAL = '00000000-0000-0000-0000-000000000001';
 
 /** El login de Ecodatos no se puede validar (configuración o Supabase caído): 503, no 500. */
 export class ErrorAuthEcodatos extends Error {}
@@ -99,6 +106,14 @@ export async function permisosDeUsuario(id: string, email: string): Promise<Sesi
 
 /** Exige un usuario de Ecodatos con sesión. Deja la sesión en `req.sesionPanel`. */
 export async function requiereSesionPanel(req: Request, res: Response, next: NextFunction) {
+  if (authLocal()) {
+    try {
+      req.sesionPanel = await permisosDeUsuario(USUARIO_LOCAL, 'local@pruebas');
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  }
   const token = /^Bearer (.+)$/.exec(req.get('authorization') ?? '')?.[1];
   if (!token) {
     res.status(401).json({ error: 'Iniciá sesión con tu usuario de Ecodatos.' });

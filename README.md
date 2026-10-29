@@ -43,6 +43,15 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 - **Storage:** los documentos de las solicitudes van a buckets privados del mismo Supabase (`fitosanitarios`, creado en `0005`). Solo la API sube y firma enlaces, con `SUPABASE_SERVICE_ROLE_KEY`; esa clave nunca va a un front.
 - **Auth:** los paneles de área (`apps/paneles`) usan el login de Ecodatos (Supabase Auth, mail y contraseña) con la anon key, que es pública. La API valida cada token contra Supabase y calcula los permisos.
 
+### 🏠 Trabajar sin la red del ministerio
+
+`npm run dev` (o `dev:api`, `dev:web`, `dev:admin`, `dev:paneles`) elige solo contra qué base trabajar: si llega al Postgres de Ecodatos del `.env`, usa Ecodatos; si no, levanta un **Postgres local de pruebas** y apunta todo ahí. Se fuerza con `DB_MODE=local` o `DB_MODE=ecodatos`.
+
+- El Postgres local es un cluster propio en `.local/` (ignorado por git, puerto 54329); no toca el del sistema. Necesita los binarios de PostgreSQL instalados (o `PG_BIN`).
+- Como Ecodatos no está, `db/local/ecodatos-stub.sql` crea una copia mínima de lo que la botonera lee de ahí (registro de fitosanitarios, permisos, `storage.buckets`) y después corren las migraciones de siempre. El registro se siembra con `fitosanitarios_domisanitarios_rows.json`.
+- Storage va a disco (`.local/storage`, `STORAGE_LOCAL_DIR`) y los paneles entran sin login como un usuario de pruebas superadmin (`AUTH_LOCAL`, que solo se respeta si `DATABASE_URL` es local). Los mails salen por consola.
+- `npm run db:local` solo prepara la base; `-- stop` la apaga y `-- reset` la rearma de cero.
+
 ## 🏗️ Arquitectura
 
 **Un solo front, con módulos como plugins.** El 90% del circuito es igual (identificar al contribuyente, ver el monto, pagar, recibir comprobante). Cambian los datos que se piden y cómo se calcula el monto.
@@ -611,3 +620,18 @@ App aparte, solo para el trabajo de campo: `apps/relevamiento` (Express + SQLite
 - Procesos con ficha (tipo, área, ¿va por la web?, estado, prioridad, responsable, norma, disparador…) y listas editables y ordenables de pasos, conceptos a pagar, documentos/certificados y datos del formulario.
 - Pestaña «Guía de relevamiento»: checklist de qué preguntar, con notas. Editable en `apps/relevamiento/src/guia.ts`.
 - Exportar a Markdown o JSON desde la pestaña «Exportar».
+
+## ▶️ Mostrar todo el flujo
+
+Una terminal por comando, todas desde la raíz del repo:
+
+| Comando | Qué levanta | Dirección |
+|---|---|---|
+| `npm run dev:api` | API (y la base local si no hay red del ministerio) | http://localhost:3001 |
+| `npm run dev:web` | Botonera pública: la persona pide el trámite y paga | http://localhost:5173 |
+| `npm run dev:paneles` | Panel de área: el técnico revisa la solicitud | http://localhost:5176 |
+| `npm run dev:admin` | Panel de Recaudaciones: pagos y trámites | http://localhost:5174 |
+
+Orden del flujo: **web** (solicitud) → **paneles** (revisión) → **web** (pago, con el proveedor `mock`) → **admin** (se ve el pago). Levantar primero `dev:api`.
+
+Para correr los cuatro juntos en una sola terminal: `npm run dev`.

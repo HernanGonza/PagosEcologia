@@ -4,6 +4,7 @@ import { modulosRouter } from './routes/modulos.js';
 import { adminRouter } from './routes/admin.js';
 import { panelesRouter } from './routes/paneles.js';
 import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
+import { descargarArchivo, storageLocalDir } from './core/storage.js';
 
 const app = express();
 // Detrás del proxy (nginx/caddy) la IP real llega en X-Forwarded-For; se usa para los topes anti-abuso.
@@ -16,6 +17,19 @@ app.use('/api/modulos', modulosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/paneles', panelesRouter);
 app.use('/api/fitosanitarios', fitosanitariosRouter);
+
+// Solo con STORAGE_LOCAL_DIR (desarrollo sin red): hace de "enlace firmado" para los archivos locales.
+if (storageLocalDir()) {
+  app.get('/api/dev-storage/:bucket/*ruta', async (req, res, next) => {
+    try {
+      const { bucket, ruta } = req.params as unknown as { bucket: string; ruta: string[] };
+      const archivo = await descargarArchivo(bucket, ruta.join('/'));
+      res.type(archivo.headers.get('content-type') ?? 'application/octet-stream').send(Buffer.from(await archivo.arrayBuffer()));
+    } catch {
+      next();
+    }
+  });
+}
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);

@@ -3,15 +3,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, FileText, MailCheck } from 'lucide-react';
-import type { TipoSolicitudPublico } from '@botonera/shared';
+import { ArrowRight, ChevronDown, FileText, MailCheck } from 'lucide-react';
+import { etiquetasEstado, type TipoSolicitudPublico } from '@botonera/shared';
 import { Button } from '@/components/ui/button';
 import { FloatingInput } from '@/components/watermelon/floating-input';
 import { cn } from '@/lib/utils';
-import { api, ErrorApi, pesos } from './api';
+import { api, ErrorApi, fechaHora, pesos, type SolicitudExistente } from './api';
 import { Aviso, Kicker, Pagina, Pasos, Tarjeta } from './comunes';
 
-type Paso = 'tipo' | 'mail' | 'codigo';
+type Paso = 'tipo' | 'mail' | 'codigo' | 'existentes';
 
 const inputClase = 'h-12 bg-white text-base focus:ring-3 focus:ring-rosa-600/20';
 
@@ -111,6 +111,7 @@ export default function Fitosanitarios() {
   const [codigo, setCodigo] = useState('');
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
+  const [existentes, setExistentes] = useState<SolicitudExistente[]>([]);
 
   useEffect(() => {
     api.tipos().then(setTipos, (e: Error) => setErrorTipos(e.message));
@@ -131,14 +132,20 @@ export default function Fitosanitarios() {
     }
   }
 
-  async function crear(e: FormEvent) {
-    e.preventDefault();
+  async function crear(e?: FormEvent, nueva = false) {
+    e?.preventDefault();
     if (!tipo) return;
     setError('');
     setOcupado(true);
     try {
-      const { token } = await api.crear(email, codigo.trim(), tipo.slug);
-      navigate(`/pagar/fitosanitarios/solicitud/${token}`, { replace: true });
+      const r = await api.crear(email, codigo.trim(), tipo.slug, nueva);
+      if ('existentes' in r) {
+        setExistentes(r.existentes);
+        setPaso('existentes');
+        setOcupado(false);
+        return;
+      }
+      navigate(`/pagar/fitosanitarios/solicitud/${r.token}`, { replace: true });
     } catch (err) {
       setError(err instanceof ErrorApi ? err.message : 'No pudimos crear la solicitud.');
       setOcupado(false);
@@ -233,6 +240,40 @@ export default function Fitosanitarios() {
               </Button>
               <Button variant="link" className="px-0 text-verde-700" onClick={() => setPaso('mail')}>
                 Cambiar el mail
+              </Button>
+            </div>
+          </Tarjeta>
+        )}
+
+        {paso === 'existentes' && tipo && (
+          <Tarjeta k="existentes">
+            <Kicker>Mail verificado</Kicker>
+            <h2 className="mt-1 text-xl font-medium text-verde-800">
+              {existentes.length === 1 ? 'Ya tenés una solicitud en curso' : `Ya tenés ${existentes.length} solicitudes en curso`}
+            </h2>
+            <p className="mt-1 text-muted-foreground">
+              Antes de empezar otra, fijate si es alguna de estas. Podés seguirla desde donde la dejaste.
+            </p>
+            <ul className="mt-5 flex flex-col gap-3">
+              {existentes.map((x) => (
+                <li key={x.token} className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-medium text-verde-800">{x.tipoNombre}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {x.numero} · {etiquetasEstado[x.estado]} · {fechaHora(x.actualizadaEn)}
+                    </p>
+                  </div>
+                  <Button className="rounded-lg" onClick={() => navigate(`/pagar/fitosanitarios/solicitud/${x.token}`)}>
+                    Continuar <ArrowRight className="size-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {error && <div className="mt-4"><Aviso>{error}</Aviso></div>}
+            <div className="mt-6 border-t border-border pt-4">
+              <p className="text-sm text-muted-foreground">¿Es un trámite distinto? Podés iniciar una solicitud nueva de «{tipo.nombre}».</p>
+              <Button variant="outline" className="mt-3 rounded-lg" disabled={ocupado} onClick={() => crear(undefined, true)}>
+                Iniciar una solicitud nueva
               </Button>
             </div>
           </Tarjeta>
