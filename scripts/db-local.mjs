@@ -78,19 +78,10 @@ async function preparar() {
   });
 }
 
-/** Un par de registros de fitosanitarios para probar la consulta. Solo si la tabla está vacía. */
+/** Catálogo de tipos de Ecodatos (el registro arranca vacío: se carga desde los trámites). Solo si falta. */
 async function sembrarRegistro(c) {
-  if ((await c.query('select 1 from public.fitosanitarios_domisanitarios limit 1')).rowCount) return;
-  const tipos = (await c.query(`insert into public.tipos_fito_domi (nombre) values ('Comercio'), ('Depósito'), ('Vehículo') returning id`)).rows;
-  const archivo = path.join(raiz, 'fitosanitarios_domisanitarios_rows.json');
-  const filas = existsSync(archivo) ? JSON.parse(readFileSync(archivo, 'utf8')) : [];
-  for (const f of filas) {
-    await c.query(
-      `insert into public.fitosanitarios_domisanitarios (id, created_at, activo, orden, empresa, tipo_id, nro_registro, actividades, direccion, anio_pago_registro)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (id) do nothing`,
-      [f.id, f.created_at, f.activo, f.orden, f.empresa, tipos[0].id, f.nro_registro, f.actividades, f.direccion, f.anio_pago_registro],
-    );
-  }
+  if ((await c.query('select 1 from public.tipos_fito_domi limit 1')).rowCount) return;
+  await c.query(`insert into public.tipos_fito_domi (nombre) values ('Comercio'), ('Depósito'), ('Vehículo'), ('Fraccionamiento')`);
 }
 
 /** Deja la base local lista y devuelve las variables de entorno para apuntar la API ahí. */

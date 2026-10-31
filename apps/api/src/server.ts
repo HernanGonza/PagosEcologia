@@ -5,10 +5,22 @@ import { adminRouter } from './routes/admin.js';
 import { panelesRouter } from './routes/paneles.js';
 import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
 import { descargarArchivo, storageLocalDir } from './core/storage.js';
+import { exigirCorreoReal } from './core/correo.js';
+import { exigirSecretoDeCodigos } from './core/verificacion.js';
+
+// En producción no se arranca con la configuración de desarrollo.
+exigirCorreoReal();
+exigirSecretoDeCodigos();
+// En producción hay que declarar cuántos proxies hay delante: confiar en cualquier IP privada permitiría falsear X-Forwarded-For desde la red interna.
+if (process.env.NODE_ENV === 'production' && !process.env.TRUST_PROXY?.trim()) {
+  throw new Error('Falta TRUST_PROXY en el .env (cantidad de proxies delante de la API, ej. 1). Sin eso los topes por IP se pueden falsear.');
+}
 
 const app = express();
 // Detrás del proxy (nginx/caddy) la IP real llega en X-Forwarded-For; se usa para los topes anti-abuso.
-app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+// TRUST_PROXY=<cantidad de proxies> (ej. 1 si hay uno solo, como HAProxy) es lo más estricto; por defecto (solo desarrollo) confía en proxies de red privada.
+const proxy = process.env.TRUST_PROXY?.trim();
+app.set('trust proxy', proxy ? (/^\d+$/.test(proxy) ? Number(proxy) : proxy) : 'loopback, linklocal, uniquelocal');
 app.use(cors());
 app.use(express.json({ limit: '200kb' }));
 

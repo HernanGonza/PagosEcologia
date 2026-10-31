@@ -15,7 +15,7 @@ const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const authLocal = import.meta.env.VITE_AUTH_LOCAL === 'true';
 
 export const supabaseConfigurado = authLocal || !!(url && anon);
-const supabase = supabaseConfigurado ? createClient(url!, anon!, { auth: { storageKey: 'paneles.sesion' } }) : null;
+const supabase = url && anon ? createClient(url!, anon!, { auth: { storageKey: 'paneles.sesion' } }) : null;
 
 /** Token vigente (Supabase lo renueva solo). */
 async function tokenActual(): Promise<string | null> {

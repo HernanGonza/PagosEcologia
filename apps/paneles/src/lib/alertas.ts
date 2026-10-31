@@ -47,6 +47,21 @@ export async function confirmar({ titulo, texto, boton: textoBoton, peligro, ico
   return r.isConfirmed;
 }
 
+/** Pide un texto (ej. el motivo de una revocación). Devuelve null si cancela o lo deja vacío. */
+export async function pedirTexto(titulo: string, boton: string, { peligro = false } = {}): Promise<string | null> {
+  const r = await base.fire({
+    title: titulo,
+    input: 'textarea',
+    inputAttributes: { 'aria-label': titulo, maxlength: '500' },
+    showCancelButton: true,
+    confirmButtonText: boton,
+    cancelButtonText: 'Cancelar',
+    customClass: clases(peligro ? confirmarRojo : confirmarVerde),
+    inputValidator: (v) => (v.trim() ? undefined : 'Escribí el motivo.'),
+  });
+  return r.isConfirmed ? String(r.value).trim() : null;
+}
+
 const toast = Swal.mixin({
   toast: true,
   position: 'top-end',

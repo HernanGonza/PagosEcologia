@@ -19,11 +19,12 @@ import {
 } from '@botonera/shared';
 import { pool } from '../../db.js';
 import { enviarCorreo, plantilla } from '../../core/correo.js';
-import { descifrar } from '../../core/secretos.js';
+import { emailCanonico } from '../../core/verificacion.js';
 
 export const MODULO = 'fitosanitarios';
 export const BUCKET = 'fitosanitarios';
 export const PROPOSITO_CODIGO = 'fitosanitarios:solicitud';
+export const PROPOSITO_RECUPERAR = 'fitosanitarios:recuperar';
 
 export class ErrorSolicitud extends Error {
   constructor(public status: number, mensaje: string) {
@@ -51,6 +52,14 @@ export interface FilaSolicitud {
   resuelta_por_email: string | null;
   aprobacion_vence: string | null;
   motivo_rechazo: string | null;
+  tipo_solicitud: 'alta' | 'renovacion';
+  email_canonico: string | null;
+  /** Referencias a Ecodatos (sin FK entre esquemas). */
+  titular_id: string | null;
+  registro_id: string | null;
+  renueva_certificado_id: string | null;
+  certificado_id: string | null;
+  vinculo_id: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -97,9 +106,46 @@ export async function tipoPublico(config: ConfigModuloFito, slug: string): Promi
   };
 }
 
-// --- Enlace privado ------------------------------------------------------------------------------
-// 32 bytes aleatorios: imposible de adivinar. Se busca por hash y se guarda cifrado para
-// poder mandarlo en los avisos (ver core/secretos.ts).
+// --- Enlace privado y sesión ---------------------------------------------------------------------
+// El mail lleva un enlace de UN SOLO USO (32 bytes al azar, en el fragmento `#`, así no llega a los
+// logs ni al Referer). Al canjearlo (`POST /sesion`) la API abre una sesión con una cookie
+// HttpOnly y el enlace deja de servir. La sesión vence por inactividad y por antigüedad máxima.
+// En la base queda solo el hash del enlace y de la cookie: no se puede reenviar uno viejo.
+
+const minutosDe = (valor: string | undefined, porDefecto: number) => (Number(valor) > 0 ? Number(valor) : porDefecto);
+/** Plazo para canjear el enlace de "recuperar": la persona está esperando el mail en pantalla. */
+export const ENLACE_SESION = { ventanaMin: minutosDe(process.env.ENLACE_RECUPERAR_MINUTOS, 15) };
+/** Plazo para canjear el enlace del mail de inicio: es para volver más tarde, y la persona ya entró por su sesión. */
+export const ENLACE_INICIO = { ventanaMin: minutosDe(process.env.ENLACE_INICIO_MINUTOS, 24 * 60) };
+/** Plazo para canjear un enlace de aviso del panel: no sabemos cuándo lo van a leer. */
+export const ENLACE_AVISO = { ventanaMin: minutosDe(process.env.ENLACE_AVISO_MINUTOS, 30 * 24 * 60) };
+export type OpcionesEnlace = { ventanaMin: number };
+/** Una sesión se cierra tras tantos minutos sin usarla... */
+export const SESION_INACTIVIDAD_MINUTOS = minutosDe(process.env.SESION_INACTIVIDAD_MINUTOS, 30);
+/** ...y, usándola siempre, a los tantos minutos de abierta. */
+export const SESION_MAXIMO_MINUTOS = minutosDe(process.env.SESION_MAXIMO_MINUTOS, 240);
+
+/** "15 minutos", "24 horas", "30 días". */
+export function textoDuracion(min: number): string {
+  if (min % 1440 === 0) return `${min / 1440} ${min === 1440 ? 'día' : 'días'}`;
+  if (min % 60 === 0 && min >= 60) return `${min / 60} ${min === 60 ? 'hora' : 'horas'}`;
+  return `${min} ${min === 1 ? 'minuto' : 'minutos'}`;
+}
+
+/** La fecha de hoy en Argentina: los plazos (`aprobacion_vence` es un `date`) vencen a medianoche de allá, no de UTC. */
+export const SQL_HOY = `(now() at time zone 'America/Argentina/Buenos_Aires')::date`;
+/** Estado "efectivo": una aprobación con el plazo de pago pasado cuenta como `vencida` aunque el estado guardado no se haya actualizado todavía. */
+export const sqlEstadoEfectivo = (alias = '') =>
+  `case when ${alias}estado = 'aprobada' and ${alias}aprobacion_vence < ${SQL_HOY} then 'vencida' else ${alias}estado end`;
+
+/**
+ * ÚNICA definición de qué solicitudes admiten un enlace (recuperar, continuar y avisos). Se calcula
+ * contra la fecha del servidor: una aprobación con el plazo de pago vencido no admite enlace aunque
+ * su estado guardado siga siendo `aprobada` (el estado `vencida` se guarda recién cuando alguien la abre).
+ */
+export const SQL_ADMITE_ENLACE = `estado not in ('rechazada','vencida') and not (estado = 'aprobada' and aprobacion_vence < ${SQL_HOY})`;
+/** "En curso": admite enlace y todavía no se emitió el certificado (es lo que se lista al iniciar otra). */
+export const SQL_EN_CURSO = `${SQL_ADMITE_ENLACE} and estado <> 'emitida'`;
 
 export const nuevoToken = () => randomBytes(32).toString('base64url');
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -107,24 +153,177 @@ export const tokenConFormato = (token: string) => /^[A-Za-z0-9_-]{43}$/.test(tok
 
 export function enlaceSolicitud(token: string) {
   const web = (process.env.WEB_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
-  return `${web}/pagar/fitosanitarios/solicitud/${token}`;
+  // El token va en el fragmento (#): el navegador no lo manda al servidor ni en el Referer.
+  return `${web}/pagar/fitosanitarios/solicitud#${token}`;
 }
 
-/** Enlace de una solicitud ya creada, para los avisos que se mandan después. */
-export async function enlaceDeSolicitud(id: string): Promise<string> {
-  const { rows } = await pool.query<{ token_cifrado: string }>('select token_cifrado from pagos.fito_solicitudes where id = $1', [id]);
-  return enlaceSolicitud(descifrar(rows[0].token_cifrado));
+/**
+ * Crea un enlace nuevo para la solicitud. NO vence los anteriores: eso se hace recién cuando el mail
+ * con el enlace nuevo salió (`vencerAnteriores`), para no dejar a la persona sin enlace si el mail falla.
+ */
+export async function emitirToken(solicitudId: string, db: Pick<PoolClient, 'query'> = pool, op: OpcionesEnlace = ENLACE_SESION): Promise<string> {
+  const token = nuevoToken();
+  await db.query("delete from pagos.fito_enlaces where expira_en < now() - interval '1 day'");
+  await db.query(
+    `insert into pagos.fito_enlaces (solicitud_id, token_hash, expira_en) values ($1, $2, now() + make_interval(mins => $3))`,
+    [solicitudId, hashToken(token), op.ventanaMin],
+  );
+  return token;
+}
+
+/**
+ * Vence los enlaces sin usar de la solicitud que se emitieron **antes** que `token`. Se ordena por
+ * `seq` (no por fecha: dos emisiones en el mismo instante empatarían) y no es "todos los demás":
+ * si dos mails salen en paralelo, el que termina último no debe matar al más nuevo.
+ */
+export async function vencerAnteriores(solicitudId: string, token: string, db: Pick<PoolClient, 'query'> = pool) {
+  await db.query(
+    `update pagos.fito_enlaces set expira_en = now()
+      where solicitud_id = $1 and usado_en is null and expira_en > now() and token_hash <> $2
+        and seq < (select seq from pagos.fito_enlaces where token_hash = $2)`,
+    [solicitudId, hashToken(token)],
+  );
+}
+
+/** ¿El enlace sigue sin usar y dentro de su plazo? (se chequea justo antes de mandar el mail) */
+export async function enlaceVigente(token: string): Promise<boolean> {
+  const { rowCount } = await pool.query('select 1 from pagos.fito_enlaces where token_hash = $1 and usado_en is null and expira_en > now()', [hashToken(token)]);
+  return !!rowCount;
+}
+
+/** Descarta un enlace recién emitido (si el mail no salió). */
+export async function descartarToken(token: string) {
+  await pool.query('update pagos.fito_enlaces set expira_en = now() where token_hash = $1', [hashToken(token)]);
+}
+
+/**
+ * Manda un aviso con un enlace nuevo. Los enlaces anteriores solo se vencen si el mail salió; si
+ * falla, el nuevo se descarta y la persona conserva el que tenía. Si mientras tanto otro enlace más
+ * nuevo ya venció a este, no se manda un mail con un enlace muerto.
+ */
+export async function avisarConEnlace(solicitudId: string, op: OpcionesEnlace, armar: (url: string) => Parameters<typeof plantilla>[0]): Promise<boolean> {
+  const token = await emitirToken(solicitudId, pool, op);
+  if (!(await enlaceVigente(token))) return false;
+  if (await avisar(armar(enlaceSolicitud(token)))) {
+    await vencerAnteriores(solicitudId, token);
+    return true;
+  }
+  await descartarToken(token);
+  return false;
+}
+
+export interface ContextoCliente {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/** Abre una sesión para la solicitud y devuelve el valor de la cookie. Cierra las sesiones anteriores de esa solicitud. */
+export async function abrirSesion(solicitudId: string, ctx: ContextoCliente = {}, db: Pick<PoolClient, 'query'> = pool): Promise<string> {
+  const valor = randomBytes(32).toString('base64url');
+  await db.query("delete from pagos.fito_sesiones where ultimo_uso < now() - interval '1 day'");
+  await db.query('delete from pagos.fito_sesiones where solicitud_id = $1', [solicitudId]);
+  await db.query('insert into pagos.fito_sesiones (solicitud_id, cookie_hash, ip, user_agent) values ($1, $2, $3, $4)', [
+    solicitudId,
+    hashToken(valor),
+    ctx.ip ?? null,
+    (ctx.userAgent ?? '').slice(0, 300) || null,
+  ]);
+  return valor;
+}
+
+export type ResultadoCanje = { cookie: string } | { motivo: 'usado'; usadoEn: Date } | { motivo: 'invalido' };
+
+/** Canjea un enlace (una sola vez). Si no vale, dice si ya se había usado (y cuándo) o si es inválido/vencido. */
+export async function canjearEnlace(token: string, ctx: ContextoCliente = {}): Promise<ResultadoCanje> {
+  if (!tokenConFormato(token)) return { motivo: 'invalido' };
+  const cookie = await enTransaccion(async (client) => {
+    const { rows } = await client.query<{ solicitud_id: string }>(
+      `update pagos.fito_enlaces set usado_en = now()
+        where token_hash = $1 and usado_en is null and expira_en > now() returning solicitud_id`,
+      [hashToken(token)],
+    );
+    return rows[0] ? abrirSesion(rows[0].solicitud_id, ctx, client) : null;
+  });
+  if (cookie) return { cookie };
+  // La única señal que tiene la persona de que alguien más usó un enlace reenviado es saber cuándo se usó.
+  const { rows } = await pool.query<{ usado_en: Date }>('select usado_en from pagos.fito_enlaces where token_hash = $1 and usado_en is not null', [hashToken(token)]);
+  return rows[0] ? { motivo: 'usado', usadoEn: rows[0].usado_en } : { motivo: 'invalido' };
+}
+
+/** La solicitud de una sesión vigente (y la renueva por inactividad), o null. */
+export async function solicitudPorSesion(cookie: string): Promise<FilaSolicitud | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(cookie)) return null;
+  const { rows: sesiones } = await pool.query<{ solicitud_id: string }>(
+    `update pagos.fito_sesiones set ultimo_uso = now()
+      where cookie_hash = $1
+        and ultimo_uso > now() - make_interval(mins => $2)
+        and created_at > now() - make_interval(mins => $3)
+      returning solicitud_id`,
+    [hashToken(cookie), SESION_INACTIVIDAD_MINUTOS, SESION_MAXIMO_MINUTOS],
+  );
+  if (!sesiones[0]) return null;
+  const { rows } = await pool.query<FilaSolicitud>(`select ${columnas} from pagos.fito_solicitudes where id = $1`, [sesiones[0].solicitud_id]);
+  return rows[0] ? aplicarVencimiento(rows[0]) : null;
+}
+
+export const PROPOSITO_PERSONA = 'fitosanitarios:persona';
+
+/** Abre una sesión de PERSONA (atada al mail verificado, no a una solicitud). Cierra las anteriores de esa casilla. */
+export async function abrirSesionPersona(email: string, ctx: ContextoCliente = {}): Promise<string> {
+  const valor = randomBytes(32).toString('base64url');
+  const canonico = emailCanonico(email);
+  await pool.query("delete from pagos.fito_sesiones where ultimo_uso < now() - interval '1 day'");
+  await pool.query('delete from pagos.fito_sesiones where solicitud_id is null and email_canonico = $1', [canonico]);
+  await pool.query(
+    'insert into pagos.fito_sesiones (solicitud_id, email, email_canonico, cookie_hash, ip, user_agent) values (null, $1, $2, $3, $4, $5)',
+    [email, canonico, hashToken(valor), ctx.ip ?? null, (ctx.userAgent ?? '').slice(0, 300) || null],
+  );
+  return valor;
+}
+
+export interface PersonaSesion {
+  email: string;
+  emailCanonico: string;
+}
+
+/**
+ * La persona (mail) de una sesión vigente, sea de persona o de una solicitud: en los dos casos la
+ * cookie prueba que controla esa casilla. La renueva por inactividad. Null si no hay sesión.
+ */
+export async function personaPorSesion(cookie: string): Promise<PersonaSesion | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(cookie)) return null;
+  const { rows } = await pool.query<{ solicitud_id: string | null; email: string | null }>(
+    `update pagos.fito_sesiones set ultimo_uso = now()
+      where cookie_hash = $1
+        and ultimo_uso > now() - make_interval(mins => $2)
+        and created_at > now() - make_interval(mins => $3)
+      returning solicitud_id, email`,
+    [hashToken(cookie), SESION_INACTIVIDAD_MINUTOS, SESION_MAXIMO_MINUTOS],
+  );
+  if (!rows[0]) return null;
+  let email = rows[0].email;
+  if (rows[0].solicitud_id) {
+    const r = await pool.query<{ email: string }>('select email from pagos.fito_solicitudes where id = $1', [rows[0].solicitud_id]);
+    email = r.rows[0]?.email ?? null;
+  }
+  return email ? { email, emailCanonico: emailCanonico(email) } : null;
+}
+
+/** Cierra la sesión de esa cookie. */
+export async function cerrarSesion(cookie: string) {
+  await pool.query('delete from pagos.fito_sesiones where cookie_hash = $1', [hashToken(cookie)]);
 }
 
 // --- Lectura -------------------------------------------------------------------------------------
 
 const columnas = `id, numero, tipo, estado, email, datos, revisor_id, revisor_nombre, revisor_email, tomada_en, enviada_en,
-  resuelta_en, resuelta_por_id, resuelta_por_nombre, resuelta_por_email, aprobacion_vence::text, motivo_rechazo, created_at, updated_at`;
+  resuelta_en, resuelta_por_id, resuelta_por_nombre, resuelta_por_email, aprobacion_vence::text, motivo_rechazo,
+  tipo_solicitud, email_canonico, titular_id, registro_id, renueva_certificado_id, certificado_id, vinculo_id, created_at, updated_at`;
 
 /** Si la aprobación venció sin pago, la solicitud pasa a `vencida` al leerla. */
 async function aplicarVencimiento(s: FilaSolicitud): Promise<FilaSolicitud> {
   if (s.estado !== 'aprobada' || !s.aprobacion_vence) return s;
-  const { rows } = await pool.query<{ vencida: boolean }>('select $1::date < current_date as vencida', [s.aprobacion_vence]);
+  const { rows } = await pool.query<{ vencida: boolean }>(`select $1::date < ${SQL_HOY} as vencida`, [s.aprobacion_vence]);
   if (!rows[0].vencida) return s;
   const client = await pool.connect();
   try {
@@ -140,9 +339,10 @@ async function aplicarVencimiento(s: FilaSolicitud): Promise<FilaSolicitud> {
   return { ...s, estado: 'vencida' };
 }
 
-export async function solicitudPorToken(token: string): Promise<FilaSolicitud | null> {
-  if (!tokenConFormato(token)) return null;
-  const { rows } = await pool.query<FilaSolicitud>(`select ${columnas} from pagos.fito_solicitudes where token_hash = $1`, [hashToken(token)]);
+
+/** Una solicitud por su número, solo si es de esa casilla (sesión de persona). */
+export async function solicitudDeLaPersona(canonico: string, numero: string): Promise<FilaSolicitud | null> {
+  const { rows } = await pool.query<FilaSolicitud>(`select ${columnas} from pagos.fito_solicitudes where numero = $1 and email_canonico = $2`, [numero, canonico]);
   return rows[0] ? aplicarVencimiento(rows[0]) : null;
 }
 
@@ -166,13 +366,14 @@ export interface FilaDocumento {
   nombre: string;
   tipo_mime: string;
   bytes: number;
+  vence_en: string | null;
   reemplazado_en: Date | null;
   created_at: Date;
 }
 
 export async function documentos(id: string, { incluirReemplazados = false } = {}): Promise<FilaDocumento[]> {
   const { rows } = await pool.query<FilaDocumento>(
-    `select id::int, requisito, ruta, nombre, tipo_mime, bytes, reemplazado_en, created_at
+    `select id::int, requisito, ruta, nombre, tipo_mime, bytes, vence_en::text, reemplazado_en, created_at
        from pagos.fito_documentos where solicitud_id = $1 ${incluirReemplazados ? '' : 'and reemplazado_en is null'}
       order by created_at`,
     [id],
@@ -187,6 +388,7 @@ export const documentoPublico = (d: FilaDocumento): DocumentoSolicitud => ({
   tipoMime: d.tipo_mime,
   bytes: d.bytes,
   subidoEn: d.created_at.toISOString(),
+  venceEn: d.vence_en,
 });
 
 export async function observaciones(id: string): Promise<ObservacionSolicitud[]> {
@@ -236,8 +438,15 @@ export async function solicitudPublica(s: FilaSolicitud): Promise<SolicitudPubli
     documentos: docs.map(documentoPublico),
     observaciones: obs,
     historial: hist,
-    pendientes: requisitosPendientes(tipo.requisitos, s.datos, docs.map((d) => d.requisito)),
+    pendientes: requisitosPendientes(
+      tipo.requisitos,
+      s.datos,
+      docs.map((d) => d.requisito),
+      docs.filter((d) => !d.vence_en).map((d) => d.requisito),
+    ),
     puedeEditar: estadosEditables.includes(s.estado),
+    tipoSolicitud: s.tipo_solicitud,
+    renuevaCertificadoId: s.renueva_certificado_id,
     enviadaEn: s.enviada_en?.toISOString() ?? null,
     aprobacionVence: s.aprobacion_vence,
     motivoRechazo: s.motivo_rechazo,
@@ -270,6 +479,10 @@ export async function cambiarEstado(
       where id = $1`,
     [s.id, nuevo, ...Object.values(extra)],
   );
+  // Rechazada o vencida: el enlace ya no sirve para nada, no hace falta que siga vigente.
+  if (nuevo === 'rechazada' || nuevo === 'vencida') {
+    await client.query('update pagos.fito_enlaces set expira_en = now() where solicitud_id = $1 and expira_en > now()', [s.id]);
+  }
   await client.query(
     `insert into pagos.fito_historial (solicitud_id, estado_anterior, estado_nuevo, actor, actor_id, actor_nombre, actor_email, ip, nota)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -297,11 +510,13 @@ export async function enTransaccion<T>(fn: (client: PoolClient) => Promise<T>): 
 // Un mail que no sale no deshace el cambio de estado: se registra y la persona igual ve todo
 // con su enlace.
 
-export async function avisar(mail: Parameters<typeof plantilla>[0]) {
+export async function avisar(mail: Parameters<typeof plantilla>[0]): Promise<boolean> {
   try {
     await enviarCorreo(plantilla(mail));
+    return true;
   } catch (e) {
     console.error(`No se pudo enviar el mail "${mail.asunto}": ${(e as Error).message}`);
+    return false;
   }
 }
 

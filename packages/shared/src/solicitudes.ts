@@ -18,6 +18,10 @@ export interface RequisitoSolicitud {
   opciones?: string[];
   /** Validación extra para `texto`. */
   formato?: 'dni-cuit' | 'email';
+  /** Documento que vence (ej. VTV): al subirlo la persona carga la fecha de vencimiento. */
+  venceEn?: boolean;
+  /** Poder firmado: solo lo presenta quien no es el titular; no vence y no es obligatorio. */
+  soloPoder?: boolean;
 }
 
 export interface TipoSolicitud {
@@ -105,19 +109,33 @@ export function errorDeValor(req: RequisitoSolicitud, valor: string | undefined)
   }
 }
 
+/** Respuesta de `representa` cuando quien presenta no es el titular: obliga a subir el poder firmado. */
+export const REPRESENTA_EN_NOMBRE = 'Presento en nombre del titular';
+export const REPRESENTA_TITULAR = 'Soy el titular';
+
+/** Un requisito `soloPoder` es obligatorio únicamente si la persona dijo que presenta en nombre del titular. */
+export const exigeElPoder = (datos: Record<string, string>) => datos.representa === REPRESENTA_EN_NOMBRE;
+
 /**
  * Requisitos obligatorios que faltan o tienen errores. Si la lista está vacía, se puede enviar.
- * `documentos` son las claves de requisito que tienen un documento vigente.
+ * `documentos` son las claves de requisito que tienen un documento vigente; `sinVencimiento`, las
+ * de esos que piden fecha de vencimiento (`venceEn`) y todavía no la tienen.
  */
 export function requisitosPendientes(
   requisitos: RequisitoSolicitud[],
   datos: Record<string, string>,
   documentos: Set<string> | string[],
+  sinVencimiento: Set<string> | string[] = [],
 ): string[] {
   const conDocumento = documentos instanceof Set ? documentos : new Set(documentos);
+  const sinFecha = sinVencimiento instanceof Set ? sinVencimiento : new Set(sinVencimiento);
   return requisitos
     .filter((r) => {
-      if (r.tipo === 'documento') return r.obligatorio && !conDocumento.has(r.clave);
+      if (r.tipo === 'documento') {
+        const obligatorio = r.soloPoder ? exigeElPoder(datos) : r.obligatorio;
+        if (obligatorio && !conDocumento.has(r.clave)) return true;
+        return !!r.venceEn && conDocumento.has(r.clave) && sinFecha.has(r.clave);
+      }
       const v = (datos[r.clave] ?? '').trim();
       return (r.obligatorio && !v) || errorDeValor(r, v) !== null;
     })
@@ -131,6 +149,8 @@ export interface DocumentoSolicitud {
   tipoMime: string;
   bytes: number;
   subidoEn: string;
+  /** Vencimiento cargado (solo requisitos con `venceEn`), AAAA-MM-DD. */
+  venceEn: string | null;
 }
 
 export interface ObservacionSolicitud {
@@ -177,6 +197,9 @@ export interface SolicitudPublica {
   /** Claves de requisitos que faltan o tienen errores. */
   pendientes: string[];
   puedeEditar: boolean;
+  tipoSolicitud: 'alta' | 'renovacion';
+  /** Certificado que renueva (solo renovaciones). */
+  renuevaCertificadoId: string | null;
   enviadaEn: string | null;
   aprobacionVence: string | null;
   motivoRechazo: string | null;
@@ -197,6 +220,8 @@ export interface SolicitudResumenPanel {
   revisorNombre: string | null;
   tomadaEn: string | null;
   observacionesAbiertas: number;
+  tipoSolicitud: 'alta' | 'renovacion';
+  titularId: string | null;
 }
 
 export interface SolicitudesPanelResponse {
@@ -219,6 +244,7 @@ export interface SolicitudPanel extends Omit<SolicitudPublica, 'documentos' | 'p
   tomada: PersonaRevision | null;
   resuelta: PersonaRevision | null;
   documentos: (DocumentoSolicitud & { url: string; reemplazado: boolean })[];
+  titularId: string | null;
   /** Qué acciones admite el estado actual (y el permiso del usuario). */
   acciones: ('tomar' | 'aprobar' | 'observar' | 'rechazar')[];
 }

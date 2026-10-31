@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, MessageSquareWarning, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MessageSquareWarning, Search, Users } from 'lucide-react';
 import type { EstadoSolicitud, SolicitudesPanelResponse } from '@botonera/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +23,8 @@ const pestanas: { id: string; label: string; estado?: EstadoSolicitud }[] = [
 export default function Lista() {
   const [params, setParams] = useSearchParams();
   const pestana = params.get('estado') ?? 'enviada';
+  // Dos listas con el mismo flujo de revisión: las altas (primera vez) y las renovaciones.
+  const clase = params.get('clase') === 'renovacion' ? 'renovacion' : 'alta';
   const q = params.get('q') ?? '';
   const pagina = Math.max(Number(params.get('pagina')) || 1, 1);
   const [busqueda, setBusqueda] = useState(q);
@@ -44,7 +46,7 @@ export default function Lista() {
 
   useEffect(() => {
     let vigente = true;
-    const filtro = new URLSearchParams({ limite: String(POR_PAGINA), desde_fila: String((pagina - 1) * POR_PAGINA) });
+    const filtro = new URLSearchParams({ limite: String(POR_PAGINA), desde_fila: String((pagina - 1) * POR_PAGINA), clase });
     const estado = pestanas.find((p) => p.id === pestana)?.estado;
     if (estado) filtro.set('estado', estado);
     if (q) filtro.set('q', q);
@@ -54,7 +56,7 @@ export default function Lista() {
     return () => {
       vigente = false;
     };
-  }, [pestana, q, pagina]);
+  }, [pestana, q, pagina, clase]);
 
   const conteo = (p: (typeof pestanas)[number]) => {
     if (!datos) return undefined;
@@ -68,8 +70,11 @@ export default function Lista() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <span className="text-xs font-semibold tracking-[0.1em] text-rosa-600 uppercase">Fitosanitarios</span>
-          <h1 className="text-2xl font-medium text-verde-800">Solicitudes de certificado</h1>
+          <h1 className="text-2xl font-medium text-verde-800">{clase === 'renovacion' ? 'Renovaciones de certificado' : 'Solicitudes de certificado'}</h1>
         </div>
+        <Button asChild variant="outline" className="rounded-lg">
+          <Link to="titulares"><Users /> Titulares y certificados</Link>
+        </Button>
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -82,9 +87,24 @@ export default function Lista() {
         </div>
       </div>
 
+      <div className="mb-3 inline-flex rounded-lg border border-border bg-white p-0.5 text-sm" role="tablist" aria-label="Tipo de solicitud">
+        {([['alta', 'Primera vez'], ['renovacion', 'Renovaciones']] as const).map(([id, texto]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={clase === id}
+            onClick={() => cambiar({ clase: id === 'alta' ? null : id, estado: null, pagina: null })}
+            className={`rounded-md px-4 py-1.5 font-medium transition-colors ${clase === id ? 'bg-verde-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            {texto}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-4 overflow-x-auto pb-1">
         <ContinuousTabs
-          key={datos ? 'con-conteo' : 'sin-conteo'}
+          key={`${clase}-${datos ? 'con-conteo' : 'sin-conteo'}`}
           size="sm"
           defaultActiveId={pestana}
           onChange={(id) => cambiar({ estado: id === 'enviada' ? null : id, pagina: null })}

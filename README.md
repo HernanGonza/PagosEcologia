@@ -39,7 +39,7 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 - El front nunca habla con Supabase: todo pasa por la API. El schema no se expone en PostgREST y tiene RLS activado por prevención.
 - Las credenciales no están en el repo. Cada quien arma su `.env` a partir de `.env.example` y las pide al dueño del proyecto.
 - Las migraciones de `db/migrations/` las corre el dueño del proyecto con `npm run migrate` (rol `postgres`, `MIGRATIONS_DATABASE_URL`). Quedan registradas en `pagos._migraciones`.
-- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` solo lee `fitosanitarios_domisanitarios` / `tipos_fito_domi` y actualiza `anio_pago_registro`. También lee las tablas de permisos de Ecodatos (`areas`, `formularios`, `usuarios_areas`, `usuarios_formularios`, `roles`, `usuarios_rol`, `profiles`) para saber quién entra a cada panel de área (`0006_permisos_ecodatos.sql`).
+- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` lee y mantiene el registro de fitosanitarios (`fitosanitarios_domisanitarios`, `fito_titulares`, `fito_vinculos`, `fito_certificados`; ver `README-titulares-y-certificados.md`) y lee `tipos_fito_domi`. También lee las tablas de permisos de Ecodatos (`areas`, `formularios`, `usuarios_areas`, `usuarios_formularios`, `roles`, `usuarios_rol`, `profiles`) para saber quién entra a cada panel de área (`0006_permisos_ecodatos.sql`).
 - **Storage:** los documentos de las solicitudes van a buckets privados del mismo Supabase (`fitosanitarios`, creado en `0005`). Solo la API sube y firma enlaces, con `SUPABASE_SERVICE_ROLE_KEY`; esa clave nunca va a un front.
 - **Auth:** los paneles de área (`apps/paneles`) usan el login de Ecodatos (Supabase Auth, mail y contraseña) con la anon key, que es pública. La API valida cada token contra Supabase y calcula los permisos.
 
@@ -48,7 +48,7 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 `npm run dev` (o `dev:api`, `dev:web`, `dev:admin`, `dev:paneles`) elige solo contra qué base trabajar: si llega al Postgres de Ecodatos del `.env`, usa Ecodatos; si no, levanta un **Postgres local de pruebas** y apunta todo ahí. Se fuerza con `DB_MODE=local` o `DB_MODE=ecodatos`.
 
 - El Postgres local es un cluster propio en `.local/` (ignorado por git, puerto 54329); no toca el del sistema. Necesita los binarios de PostgreSQL instalados (o `PG_BIN`).
-- Como Ecodatos no está, `db/local/ecodatos-stub.sql` crea una copia mínima de lo que la botonera lee de ahí (registro de fitosanitarios, permisos, `storage.buckets`) y después corren las migraciones de siempre. El registro se siembra con `fitosanitarios_domisanitarios_rows.json`.
+- Como Ecodatos no está, `db/local/ecodatos-stub.sql` crea una copia mínima de lo que la botonera lee de ahí (registro de fitosanitarios, permisos, `storage.buckets`) y después corren las migraciones de siempre. El registro arranca vacío (se carga desde los trámites); solo se siembra el catálogo de tipos.
 - Storage va a disco (`.local/storage`, `STORAGE_LOCAL_DIR`) y los paneles entran sin login como un usuario de pruebas superadmin (`AUTH_LOCAL`, que solo se respeta si `DATABASE_URL` es local). Los mails salen por consola.
 - `npm run db:local` solo prepara la base; `-- stop` la apaga y `-- reset` la rearma de cero.
 
@@ -532,7 +532,7 @@ Reglas:
 Para trámites donde el área controla requisitos antes de cobrar (hoy, fitosanitarios). **La persona no crea cuenta:**
 
 1. Elige el tipo (vehículo, comercio, depósito…), pone su mail y confirma un código de 6 dígitos (vale 15 min, 5 intentos; máximo 5 códigos por mail y 20 por IP por hora).
-2. Se crea la solicitud con un **enlace privado** (`/pagar/fitosanitarios/solicitud/<token>`) que le llega por mail. En la base se guarda el hash del token para buscarlo y el token cifrado (`SOLICITUDES_SECRETO`) para reenviar el enlace en los avisos. Si lo pierde, lo pide de nuevo con su mail.
+2. Se crea la solicitud y la persona entra con una **sesión** (cookie `HttpOnly`: 30 min de inactividad, 4 h máximo). Para volver le llega por mail un **enlace de un solo uso** (`/pagar/fitosanitarios/solicitud#<token>`); cada mail lleva uno nuevo que anula los anteriores. Si lo pierde o venció, pide otro con su mail y un código. Todo el detalle (flujos, vigencias, seguridad y límites) está en [`README-mails-y-seguridad.md`](README-mails-y-seguridad.md). El pago todavía no está implementado.
 3. Carga datos y documentos (PDF, JPG o PNG, hasta 10 MB; el tipo se comprueba por contenido). No puede enviar hasta cumplir todos los requisitos.
 4. Los técnicos la ven en su panel: la **toman**, la **aprueban**, la **observan** (por requisito o en general) o la **rechazan** con un motivo. Cada acción le avisa por mail y queda en el historial y en la auditoría.
 5. Si está observada, corrige lo marcado y la reenvía. Aprobada, tiene `aprobacionDias` (30) para pagar; si no, vence.
@@ -598,7 +598,7 @@ npm run dev:admin        # panel de Recaudaciones → http://localhost:5174 (req
 npm run dev:paneles      # paneles de área → http://localhost:5176 (login de Ecodatos)
 ```
 
-Para las solicitudes, el `.env` necesita además `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SOLICITUDES_SECRETO` y el mail (o `MAIL_PROVIDER=consola`). Está todo explicado en `.env.example`.
+Para las solicitudes, el `.env` necesita además `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` y el mail (o `MAIL_PROVIDER=consola`). Está todo explicado en `.env.example`.
 
 ## ✅ Pendiente del módulo fitosanitarios
 

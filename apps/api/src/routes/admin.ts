@@ -292,3 +292,72 @@ adminRouter.get('/auditoria', async (_req, res, next) => {
     next(error);
   }
 });
+
+/**
+ * Cargar un valor nuevo de tarifa (Recaudaciones, panel financiero). Las tarifas son versionadas: se
+ * agrega una versión con su fecha de vigencia, nunca se pisa lo anterior ni se cambia el pasado.
+ * Solo importes fijos (en pesos, se guardan en centavos); las escalas se cargan por migración.
+ * Queda en la auditoría con el valor anterior. Como todo `/api/admin`, no responde hasta que haya login.
+ */
+adminRouter.post('/tarifas', async (req, res, next) => {
+  try {
+    const moduloSlug = String(req.body?.moduloSlug ?? '');
+    const concepto = String(req.body?.concepto ?? '');
+    const vigenteDesde = String(req.body?.vigenteDesde ?? '');
+    const pesosIngresados = Number(req.body?.importePesos);
+    if (!/^[a-z0-9-]{1,80}$/.test(moduloSlug) || !/^[a-z0-9-]{1,80}$/.test(concepto)) {
+      res.status(400).json({ error: 'Trámite o concepto inválido.' });
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(vigenteDesde) || vigenteDesde < hoyAr()) {
+      res.status(400).json({ error: 'La fecha de vigencia no puede ser anterior a hoy.' });
+      return;
+    }
+    if (!Number.isFinite(pesosIngresados) || pesosIngresados <= 0 || pesosIngresados > 100_000_000) {
+      res.status(400).json({ error: 'El importe tiene que ser mayor a cero.' });
+      return;
+    }
+    const centavos = Math.round(pesosIngresados * 100);
+    const modulo = await pool.query<{ config: Partial<ConfigModulo> }>('select config from pagos.modulos where slug = $1', [moduloSlug]);
+    if (!modulo.rows[0]) {
+      res.status(404).json({ error: 'El trámite no existe.' });
+      return;
+    }
+    const previa = await pool.query<{ valor: unknown }>(
+      `select valor from pagos.tarifas where modulo_slug = $1 and concepto = $2 and vigente_desde <= $3::date
+        order by vigente_desde desc, id desc limit 1`,
+      [moduloSlug, concepto, vigenteDesde],
+    );
+    if (previa.rows[0] && typeof previa.rows[0].valor !== 'number') {
+      res.status(409).json({ error: 'Esta tarifa es una escala por tramos: se cambia con una migración.' });
+      return;
+    }
+    if (!previa.rows[0] && !conceptosDeMonto(modulo.rows[0].config.monto).includes(concepto)) {
+      res.status(404).json({ error: 'Ese concepto no existe en el trámite.' });
+      return;
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(
+        `insert into pagos.tarifas (modulo_slug, concepto, valor, vigente_desde, creado_por)
+         values ($1, $2, $3::jsonb, $4::date, 'panel-financiero')
+         on conflict (modulo_slug, concepto, vigente_desde) do update set valor = excluded.valor, creado_por = excluded.creado_por`,
+        [moduloSlug, concepto, JSON.stringify(centavos), vigenteDesde],
+      );
+      await client.query(
+        "insert into pagos.auditoria (actor, accion, entidad, entidad_id, antes, despues) values ('panel-financiero', 'tarifa', 'tarifa', $1, $2, $3)",
+        [`${moduloSlug}/${concepto}`, { centavos: previa.rows[0]?.valor ?? null }, { centavos, vigenteDesde }],
+      );
+      await client.query('commit');
+    } catch (e) {
+      await client.query('rollback');
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});

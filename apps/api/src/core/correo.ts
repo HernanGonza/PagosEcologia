@@ -35,6 +35,13 @@ function via(): Via | null {
 
 export const correoConfigurado = () => via() !== null;
 
+/** Falla al arrancar en producción si el mail va a la consola (imprimiría códigos y enlaces en los logs). */
+export function exigirCorreoReal() {
+  if (process.env.NODE_ENV === 'production' && via() === 'consola') {
+    throw new Error('MAIL_PROVIDER=consola no se puede usar en producción: imprimiría los códigos y enlaces en los logs.');
+  }
+}
+
 let transporte: nodemailer.Transporter | null = null;
 
 async function enviarGmail(m: Mail) {

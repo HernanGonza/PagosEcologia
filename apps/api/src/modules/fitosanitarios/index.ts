@@ -3,8 +3,10 @@ import { pool } from '../../db.js';
 import { ErrorCorreo } from '../../core/correo.js';
 import { ErrorStorage } from '../../core/storage.js';
 import { panelRouter } from './panel.js';
-import { publicoRouter } from './publico.js';
-import { MODULO, ErrorSolicitud } from './solicitudes.js';
+import { publicoRouter, seguridadPublica } from './publico.js';
+import { personaRouter } from './persona.js';
+import { emitirCertificado, verificarPorCodigo } from './certificados.js';
+import { MODULO, ErrorSolicitud, bloquear, cambiarEstado, enTransaccion } from './solicitudes.js';
 import { registrarPendientes } from '../../routes/paneles.js';
 
 export const fitosanitariosRouter = Router();
@@ -15,40 +17,60 @@ registrarPendientes(MODULO, async () => {
   return rows[0].n;
 });
 
-// El registro es public.fitosanitarios_domisanitarios (Ecodatos). Todavía no tiene DNI/CUIT
-// ni fecha de vencimiento: los agrega el área y recién ahí se habilita la búsqueda.
-fitosanitariosRouter.get('/certificados/:identificador', (req, res) => {
-  const identificador = String(req.params.identificador).replace(/\D/g, '');
-  if (identificador.length !== 8 && identificador.length !== 11) {
-    res.status(400).json({ error: 'Ingresá un DNI de 8 dígitos o un CUIT de 11 dígitos.' });
-    return;
-  }
-  res.status(503).json({ error: 'La búsqueda por DNI o CUIT todavía no está disponible.' });
-});
-
-fitosanitariosRouter.get('/tarifa', async (_req, res, next) => {
+// --- Verificación pública del certificado (la abre el QR del PDF) -----------------------------------
+// Sin cookies ni sesión. Datos mínimos; un código inexistente o mal formado da siempre la misma respuesta.
+// Tope por IP en memoria (alcanza para frenar un barrido; con varias instancias, ponerlo también en el proxy).
+const pedidosVerificacion = new Map<string, { n: number; desde: number }>();
+fitosanitariosRouter.get('/verificar/:codigo', async (req, res, next) => {
   try {
-    const result = await pool.query(
-      `select id, valor as importe_centavos, vigente_desde
-         from pagos.tarifas
-        where modulo_slug = 'fitosanitarios'
-          and concepto = 'renovacion-anual'
-          and vigente_desde <= current_date
-        order by vigente_desde desc, id desc
-        limit 1`,
-    );
-    if (!result.rowCount) {
-      res.status(503).json({ error: 'El valor de renovación todavía no está configurado.' });
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const ip = req.ip ?? 'desconocida';
+    const ahora = Date.now();
+    const previo = pedidosVerificacion.get(ip);
+    const ventana = previo && ahora - previo.desde < 60_000 ? previo : { n: 0, desde: ahora };
+    ventana.n += 1;
+    pedidosVerificacion.set(ip, ventana);
+    if (pedidosVerificacion.size > 10_000) pedidosVerificacion.clear();
+    if (ventana.n > 30) {
+      res.status(429).json({ error: 'Demasiadas consultas. Esperá un minuto.' });
       return;
     }
-    res.json(result.rows[0]);
+    const v = await verificarPorCodigo(String(req.params.codigo));
+    if (!v) {
+      res.status(404).json({ error: 'No encontramos un certificado con ese código.' });
+      return;
+    }
+    res.json(v);
   } catch (error) {
     next(error);
   }
 });
 
+// Emisión SIMULADA, solo para probar el circuito en desarrollo: el pago real todavía no está implementado.
+// Con EMISION_SIMULADA=1 una solicitud aprobada se marca pagada y se emite. Nunca en producción.
+if (process.env.EMISION_SIMULADA === '1') {
+  if (process.env.NODE_ENV === 'production') throw new Error('EMISION_SIMULADA no puede estar activa en producción.');
+  fitosanitariosRouter.post('/dev/emitir/:numero', async (req, res, next) => {
+    try {
+      const { rows } = await pool.query<{ id: string }>('select id from pagos.fito_solicitudes where numero = $1', [String(req.params.numero)]);
+      if (!rows[0]) throw new ErrorSolicitud(404, 'La solicitud no existe.');
+      const c = await enTransaccion(async (client) => {
+        const s = await bloquear(client, rows[0].id);
+        if (s.estado !== 'aprobada') throw new ErrorSolicitud(409, 'La solicitud tiene que estar aprobada.');
+        await cambiarEstado(client, s, 'pagada', { actor: 'sistema', nota: 'Pago simulado (desarrollo).' });
+        return emitirCertificado(client, { ...s, estado: 'pagada' }, { actor: 'sistema' });
+      });
+      res.json(c);
+    } catch (error) {
+      next(error);
+    }
+  });
+}
+
 // Solicitudes con revisión técnica: la parte pública (sin cuenta) y el panel del área.
 fitosanitariosRouter.use('/panel', panelRouter);
+fitosanitariosRouter.use('/persona', seguridadPublica, personaRouter);
 fitosanitariosRouter.use(publicoRouter);
 
 // Errores esperables con su mensaje; el resto, 500 sin detalles hacia afuera.

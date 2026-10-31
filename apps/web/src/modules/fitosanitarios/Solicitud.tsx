@@ -1,12 +1,13 @@
 // Solicitud de fitosanitarios, a la que la persona entra con su enlace privado. Según el estado:
 // cargar o corregir requisitos, esperar la revisión, pagar (cuando se integre) o ver el motivo de rechazo.
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
 import { AlertTriangle, Check, CircleX, Clock, Eye, FileText, Hourglass, Loader2, Upload } from 'lucide-react';
 import {
   etiquetasEstado,
   formatosDocumento,
+  exigeElPoder,
   maxBytesDocumento,
   type EstadoSolicitud,
   type ObservacionSolicitud,
@@ -17,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FloatingInput } from '@/components/watermelon/floating-input';
 import { cn } from '@/lib/utils';
-import { api, fecha, fechaHora, pesos } from './api';
+import { api, fecha, fechaHora, fijarSolicitud, pesos } from './api';
 import { Aviso, Pagina, Pasos, Tarjeta } from './comunes';
 
 const pasoDeEstado: Record<EstadoSolicitud, number> = {
@@ -100,8 +101,7 @@ function Campo({ req, valor, error, onChange, observaciones }: {
   );
 }
 
-function Documento({ token, req, solicitud, onSubido, observaciones }: {
-  token: string;
+function Documento({ req, solicitud, onSubido, observaciones }: {
   req: RequisitoSolicitud;
   solicitud: SolicitudPublica;
   onSubido: (s: SolicitudPublica) => void;
@@ -111,17 +111,33 @@ function Documento({ token, req, solicitud, onSubido, observaciones }: {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState('');
   const actual = solicitud.documentos.find((d) => d.requisito === req.clave);
+  // Documentos que vencen (ej. VTV): la fecha se pide antes de subir y se puede corregir después.
+  const [venceEn, setVenceEn] = useState(actual?.venceEn ?? '');
+  const hoy = new Date().toISOString().slice(0, 10);
+  const vencido = !!actual?.venceEn && actual.venceEn < hoy;
+
+  async function corregirFecha(valor: string) {
+    setVenceEn(valor);
+    if (!actual || !valor) return;
+    setError('');
+    try {
+      onSubido(await api.fijarVencimiento(req.clave, valor));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   async function elegir(e: ChangeEvent<HTMLInputElement>) {
     const archivo = e.target.files?.[0];
     e.target.value = '';
     if (!archivo) return;
     setError('');
+    if (req.venceEn && !venceEn) return setError('Primero indicá la fecha de vencimiento del documento.');
     if (archivo.size > maxBytesDocumento) return setError('El archivo supera los 10 MB.');
     if (archivo.type && !formatosDocumento[archivo.type]) return setError(`Subí un archivo ${Object.values(formatosDocumento).join(', ')}.`);
     setSubiendo(true);
     try {
-      onSubido(await api.subirDocumento(token, req.clave, archivo));
+      onSubido(await api.subirDocumento(req.clave, archivo, req.venceEn ? venceEn : undefined));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -147,11 +163,23 @@ function Documento({ token, req, solicitud, onSubido, observaciones }: {
           ) : (
             <p className="text-sm text-muted-foreground">{req.ayuda ?? 'PDF, JPG o PNG, hasta 10 MB.'}</p>
           )}
+          {req.venceEn && (
+            <label className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              Vence el
+              <input
+                type="date"
+                value={venceEn}
+                onChange={(e) => corregirFecha(e.target.value)}
+                className={cn('h-9 rounded-lg border px-2 text-foreground', vencido && 'border-destructive')}
+              />
+              {vencido && <span className="font-medium text-destructive">Vencido: subí uno vigente.</span>}
+            </label>
+          )}
         </div>
         <div className="flex gap-2">
           {actual && (
             <Button asChild variant="ghost" size="sm" className="rounded-lg">
-              <a href={api.urlDocumento(token, actual.id)} target="_blank" rel="noreferrer">
+              <a href={api.urlDocumento(actual.id)} target="_blank" rel="noreferrer">
                 <Eye /> Ver
               </a>
             </Button>
@@ -169,7 +197,7 @@ function Documento({ token, req, solicitud, onSubido, observaciones }: {
   );
 }
 
-function Formulario({ token, solicitud, setSolicitud }: { token: string; solicitud: SolicitudPublica; setSolicitud: (s: SolicitudPublica) => void }) {
+function Formulario({ solicitud, setSolicitud }: { solicitud: SolicitudPublica; setSolicitud: (s: SolicitudPublica) => void }) {
   const [datos, setDatos] = useState<Record<string, string>>(solicitud.datos);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [guardado, setGuardado] = useState<'ok' | 'guardando' | 'error'>('ok');
@@ -181,7 +209,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
   const deRequisito = (clave: string) => abiertas.filter((o) => o.requisito === clave);
   const generales = abiertas.filter((o) => !o.requisito);
   const campos = solicitud.tipo.requisitos.filter((r) => r.tipo !== 'documento');
-  const documentos = solicitud.tipo.requisitos.filter((r) => r.tipo === 'documento');
+  const documentos = solicitud.tipo.requisitos.filter((r) => r.tipo === 'documento' && (!r.soloPoder || exigeElPoder(datos)));
   const etiquetas = new Map(solicitud.tipo.requisitos.map((r) => [r.clave, r.etiqueta]));
 
   function cambiar(clave: string, valor: string) {
@@ -191,7 +219,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(async () => {
       try {
-        const r = await api.guardarDatos(token, nuevos);
+        const r = await api.guardarDatos(nuevos);
         setErrores(r.errores);
         setSolicitud(r);
         setGuardado('ok');
@@ -207,7 +235,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
     setError('');
     setEnviando(true);
     try {
-      setSolicitud(await api.enviar(token));
+      setSolicitud(await api.enviar());
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError((err as Error).message);
@@ -230,8 +258,12 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
         </div>
       ) : (
         <>
-          <h2 className="text-xl font-medium text-verde-800">Completá los requisitos</h2>
-          <p className="mt-1 mb-6 text-muted-foreground">Lo que cargás se guarda solo. Podés seguir más tarde con tu enlace.</p>
+          <h2 className="text-xl font-medium text-verde-800">{solicitud.tipoSolicitud === 'renovacion' ? 'Revisá los datos de la renovación' : 'Completá los requisitos'}</h2>
+          <p className="mt-1 mb-6 text-muted-foreground">
+            {solicitud.tipoSolicitud === 'renovacion'
+              ? 'Cargamos lo que ya teníamos. Si no cambió nada y tus documentos siguen vigentes, la renovación se aprueba sola; si cambiás algo, la revisan los técnicos.'
+              : 'Lo que cargás se guarda solo. Podés seguir más tarde con tu enlace.'}
+          </p>
         </>
       )}
 
@@ -245,7 +277,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
       <h3 className="mt-8 mb-3 font-medium text-verde-700">Documentos</h3>
       <div className="flex flex-col gap-3">
         {documentos.map((r) => (
-          <Documento key={r.clave} token={token} req={r} solicitud={solicitud} onSubido={setSolicitud} observaciones={deRequisito(r.clave)} />
+          <Documento key={r.clave} req={r} solicitud={solicitud} onSubido={setSolicitud} observaciones={deRequisito(r.clave)} />
         ))}
       </div>
 
@@ -259,7 +291,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
         <div className="flex flex-wrap items-center gap-4">
           <Button size="lg" className="rounded-lg" disabled={!puedeEnviar} onClick={enviar}>
             {enviando && <Loader2 className="animate-spin" />}
-            {solicitud.estado === 'observada' ? 'Reenviar con las correcciones' : 'Enviar a revisión'}
+            {solicitud.estado === 'observada' ? 'Reenviar con las correcciones' : solicitud.tipoSolicitud === 'renovacion' ? 'Enviar la renovación' : 'Enviar a revisión'}
           </Button>
           <span className={cn('text-sm', guardado === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
             {{ ok: 'Cambios guardados', guardando: 'Guardando…', error: 'No se pudo guardar. Revisá tu conexión.' }[guardado]}
@@ -271,7 +303,7 @@ function Formulario({ token, solicitud, setSolicitud }: { token: string; solicit
 }
 
 /** Lo presentado, de solo lectura. */
-function Resumen({ token, solicitud }: { token: string; solicitud: SolicitudPublica }) {
+function Resumen({ solicitud }: { solicitud: SolicitudPublica }) {
   return (
     <details className="mt-6 rounded-2xl border border-border bg-white p-5 sm:p-6">
       <summary className="cursor-pointer font-medium text-verde-800">Lo que presentaste</summary>
@@ -286,7 +318,7 @@ function Resumen({ token, solicitud }: { token: string; solicitud: SolicitudPubl
       <ul className="mt-4 flex flex-col gap-2">
         {solicitud.documentos.map((d) => (
           <li key={d.id}>
-            <a href={api.urlDocumento(token, d.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-verde-700 hover:underline">
+            <a href={api.urlDocumento(d.id)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-verde-700 hover:underline">
               <FileText className="size-4" />
               {solicitud.tipo.requisitos.find((r) => r.clave === d.requisito)?.etiqueta}: {d.nombre}
             </a>
@@ -325,14 +357,45 @@ function Estado({ icono, tono, titulo, children }: { icono: ReactNode; tono: str
   );
 }
 
+/**
+ * Token del enlace del mail (va en el fragmento `#`, que el navegador no manda al servidor ni en el
+ * Referer). Se lee una vez y se borra de la URL y del historial enseguida.
+ */
+let tokenDeLaUrl = (() => {
+  const t = window.location.hash.replace(/^#/, '');
+  if (t) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  return /^[A-Za-z0-9_-]{43}$/.test(t) ? t : '';
+})();
+
 export default function Solicitud() {
-  const { token = '' } = useParams();
+  // Desde "Mis certificados" se llega con ?n=<número>: la sesión es de persona y se indica cuál solicitud abrir.
+  const [params] = useSearchParams();
+  const numeroDeLaUrl = params.get('n') ?? '';
+  fijarSolicitud(numeroDeLaUrl);
   const [solicitud, setSolicitud] = useState<SolicitudPublica | null>(null);
   const [error, setError] = useState('');
+  const [abriendo, setAbriendo] = useState(false);
+  // Si llegó por el enlace de un mail, el token vino en el fragmento (#): todavía hay que canjearlo.
+  const [porCanjear, setPorCanjear] = useState(tokenDeLaUrl !== '');
 
   useEffect(() => {
-    api.solicitud(token).then(setSolicitud, (e: Error) => setError(e.message));
-  }, [token]);
+    // Sin enlace por canjear: se entra con la sesión (cookie) que ya tiene.
+    if (!porCanjear) api.solicitud().then(setSolicitud, (e: Error) => setError(e.message));
+  }, [porCanjear]);
+
+  // El canje es un clic explícito (no al cargar la página): un escáner de mails que solo visite el
+  // enlace no gasta el enlace de un solo uso. Es la única vez que el token viaja, en el cuerpo de un POST.
+  async function abrir() {
+    setAbriendo(true);
+    try {
+      await api.abrirSesion(tokenDeLaUrl);
+      tokenDeLaUrl = '';
+      setPorCanjear(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setAbriendo(false);
+  }
 
   if (error) {
     return (
@@ -341,6 +404,18 @@ export default function Solicitud() {
         <Button asChild className="mt-6 rounded-lg">
           <Link to="/pagar/fitosanitarios">Ir al inicio del trámite</Link>
         </Button>
+      </Pagina>
+    );
+  }
+  if (porCanjear && !solicitud) {
+    return (
+      <Pagina titulo="Tu solicitud de fitosanitarios" bajada="Por seguridad, el enlace de tu mail se usa una sola vez.">
+        <Tarjeta k="canje">
+          <p className="text-muted-foreground">Tocá el botón para entrar a tu solicitud. Si el enlace ya se usó o venció, podés pedir uno nuevo con tu mail.</p>
+          <Button size="lg" className="mt-5 rounded-lg" disabled={abriendo} onClick={abrir}>
+            {abriendo ? <Loader2 className="size-4 animate-spin" /> : null} Abrir mi solicitud
+          </Button>
+        </Tarjeta>
       </Pagina>
     );
   }
@@ -355,7 +430,7 @@ export default function Solicitud() {
   const s = solicitud;
   return (
     <Pagina
-      titulo={s.tipo.nombre}
+      titulo={s.tipoSolicitud === 'renovacion' ? `Renovación: ${s.tipo.nombre}` : s.tipo.nombre}
       bajada={
         <span className="flex flex-wrap items-center gap-2">
           Solicitud <strong className="text-foreground">{s.numero}</strong>
@@ -367,7 +442,7 @@ export default function Solicitud() {
 
       <AnimatePresence mode="wait">
         {s.puedeEditar ? (
-          <Formulario key={s.estado} token={token} solicitud={s} setSolicitud={setSolicitud} />
+          <Formulario key={s.estado} solicitud={s} setSolicitud={setSolicitud} />
         ) : (
           <Tarjeta k={s.estado}>
             {(s.estado === 'enviada' || s.estado === 'en_revision') && (
@@ -419,11 +494,17 @@ export default function Solicitud() {
         )}
       </AnimatePresence>
 
-      {!s.puedeEditar && <Resumen token={token} solicitud={s} />}
+      {!s.puedeEditar && <Resumen solicitud={s} />}
       <Historial solicitud={s} />
-      <p className="mt-6 text-center text-xs text-muted-foreground">
-        Este enlace es personal: con él podés volver a tu solicitud. También te lo mandamos por mail.
-      </p>
+      {numeroDeLaUrl ? (
+        <p className="mt-6 text-center text-sm">
+          <Link to="/pagar/fitosanitarios/mis-certificados" className="text-verde-700 hover:underline">← Volver a mis certificados</Link>
+        </p>
+      ) : (
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          Este enlace es personal: con él podés volver a tu solicitud. También te lo mandamos por mail.
+        </p>
+      )}
     </Pagina>
   );
 }

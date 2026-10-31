@@ -88,7 +88,13 @@ export default function Detalle() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-medium tabular-nums text-verde-800">{s.numero}</h1>
             <EstadoBadge estado={s.estado} />
+            {s.tipoSolicitud === 'renovacion' && <span className="rounded-full bg-azul-600/10 px-2.5 py-0.5 text-xs font-medium text-azul-600">Renovación</span>}
           </div>
+          {s.titularId && (
+            <p className="mt-1 text-sm">
+              <Link to={`../titulares/${s.titularId}`} className="text-verde-700 hover:underline">Ver el titular y sus certificados →</Link>
+            </p>
+          )}
           <p className="mt-1 text-muted-foreground">
             {s.tipo.nombre} · enviada el {fecha(s.enviadaEn)} · {s.email}
           </p>
@@ -296,6 +302,11 @@ function Archivo({ d, onAbrir }: { d: Doc; onAbrir: (id: number) => void }) {
       <span className="shrink-0 text-xs text-muted-foreground">
         {tamano(d.bytes)} · {fecha(d.subidoEn)}
       </span>
+      {d.venceEn && (
+        <span className={cn('shrink-0 text-xs font-medium', d.venceEn < new Date().toISOString().slice(0, 10) ? 'text-destructive' : 'text-muted-foreground')}>
+          Vence {fecha(d.venceEn)}{d.venceEn < new Date().toISOString().slice(0, 10) ? ' (vencido)' : ''}
+        </span>
+      )}
     </button>
   );
 }

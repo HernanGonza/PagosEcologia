@@ -37,3 +37,4 @@ export * from './contrato.js';
 export * from './admin.js';
 export * from './solicitudes.js';
 export * from './paneles.js';
+export * from './titulares.js';

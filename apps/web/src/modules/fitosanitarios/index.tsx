@@ -1,7 +1,7 @@
 // Inicio del trámite: elegir el tipo de certificado, verificar el mail y crear la solicitud.
 // Desde ahí la persona sigue con su enlace privado (Solicitud.tsx).
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, ChevronDown, FileText, MailCheck } from 'lucide-react';
 import { etiquetasEstado, type TipoSolicitudPublico } from '@botonera/shared';
@@ -65,38 +65,100 @@ function TarjetaTipo({ tipo, elegir }: { tipo: TipoSolicitudPublico; elegir: () 
   );
 }
 
+/** Por qué se llegó acá sin sesión: enlace vencido o reemplazado, o enlace que ya se usó (y cuándo). */
+function AvisoEnlace() {
+  const q = new URLSearchParams(window.location.search);
+  const motivo = q.get('enlace');
+  if (motivo === 'usado') {
+    const cuando = q.get('cuando');
+    return (
+      <div className="mt-8">
+        <Aviso>
+          Este enlace ya se usó{cuando && !Number.isNaN(Date.parse(cuando)) ? ` el ${fechaHora(cuando)}` : ''}; los enlaces valen una sola vez. Si fuiste vos, pedí un enlace nuevo con tu mail acá abajo. Si no fuiste vos, pedí igual uno nuevo (cierra la sesión anterior) y avisanos.
+        </Aviso>
+      </div>
+    );
+  }
+  if (motivo === 'vencido') {
+    return (
+      <div className="mt-8">
+        <Aviso>Tu sesión venció o el enlace ya no vale (se usa una sola vez, vence y lo reemplaza uno más nuevo). Pedí uno nuevo con tu mail acá abajo.</Aviso>
+      </div>
+    );
+  }
+  return null;
+}
+
 function Recuperar() {
   const [email, setEmail] = useState('');
-  const [estado, setEstado] = useState<'idle' | 'enviando' | 'listo' | string>('idle');
+  const [codigo, setCodigo] = useState('');
+  const [paso, setPaso] = useState<'mail' | 'codigo' | 'listo'>('mail');
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState('');
+  async function pedir(e?: FormEvent) {
+    e?.preventDefault();
+    setOcupado(true);
+    setError('');
+    try {
+      await api.pedirCodigo(email, 'recuperar');
+      setPaso('codigo');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    setOcupado(false);
+  }
   async function enviar(e: FormEvent) {
     e.preventDefault();
-    setEstado('enviando');
+    setOcupado(true);
+    setError('');
     try {
-      await api.recuperar(email);
-      setEstado('listo');
+      await api.recuperar(email, codigo.trim());
+      setPaso('listo');
     } catch (err) {
-      setEstado((err as Error).message);
+      setError((err as Error).message);
     }
+    setOcupado(false);
   }
   return (
     <section className="mt-10 rounded-2xl border border-dashed border-border p-5 sm:p-6">
       <h2 className="font-medium text-verde-800">¿Ya iniciaste una solicitud?</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Te mandamos de nuevo los enlaces de tus solicitudes al mail con que las iniciaste.</p>
-      {estado === 'listo' ? (
+      <p className="mt-1 text-sm text-muted-foreground">
+        Te mandamos un código para confirmar que el mail es tuyo y, con él, un enlace nuevo a tus solicitudes. Es de un solo uso y reemplaza a los anteriores.
+      </p>
+      {paso === 'listo' ? (
         <div className="mt-4">
-          <Aviso tono="ok">Si hay solicitudes con ese mail, en unos minutos te llegan los enlaces.</Aviso>
+          <Aviso tono="ok">Si hay solicitudes con ese mail, en unos minutos te llega el enlace nuevo.</Aviso>
         </div>
-      ) : (
-        <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={enviar}>
+      ) : paso === 'mail' ? (
+        <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={pedir}>
           <div className="flex-1">
             <FloatingInput label="Tu mail" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} labelClassName="bg-crema" className={cn(inputClase, 'bg-transparent')} />
           </div>
-          <Button type="submit" variant="outline" size="lg" className="h-12 rounded-lg" disabled={estado === 'enviando'}>
+          <Button type="submit" variant="outline" size="lg" className="h-12 rounded-lg" disabled={ocupado}>
+            Enviar código
+          </Button>
+        </form>
+      ) : (
+        <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={enviar}>
+          <div className="flex-1">
+            <FloatingInput
+              label={`Código que enviamos a ${email}`}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              required
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
+              labelClassName="bg-crema"
+              className={cn(inputClase, 'bg-transparent')}
+            />
+          </div>
+          <Button type="submit" variant="outline" size="lg" className="h-12 rounded-lg" disabled={ocupado || codigo.length !== 6}>
             Reenviar enlaces
           </Button>
         </form>
       )}
-      {!['idle', 'enviando', 'listo'].includes(estado) && <div className="mt-3"><Aviso>{estado}</Aviso></div>}
+      {error && <div className="mt-3"><Aviso>{error}</Aviso></div>}
     </section>
   );
 }
@@ -145,9 +207,21 @@ export default function Fitosanitarios() {
         setOcupado(false);
         return;
       }
-      navigate(`/pagar/fitosanitarios/solicitud/${r.token}`, { replace: true });
+      navigate('/pagar/fitosanitarios/solicitud', { replace: true });
     } catch (err) {
       setError(err instanceof ErrorApi ? err.message : 'No pudimos crear la solicitud.');
+      setOcupado(false);
+    }
+  }
+
+  async function continuar(numero: string) {
+    setOcupado(true);
+    setError('');
+    try {
+      await api.continuar(email, codigo.trim(), numero);
+      navigate('/pagar/fitosanitarios/solicitud');
+    } catch (err) {
+      setError(err instanceof ErrorApi ? err.message : 'No pudimos abrir la solicitud.');
       setOcupado(false);
     }
   }
@@ -180,6 +254,16 @@ export default function Fitosanitarios() {
                 />
               ))}
             </div>
+            <AvisoEnlace />
+            <section className="mt-10 flex flex-col gap-3 rounded-2xl border border-verde-500/40 bg-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div>
+                <h2 className="font-medium text-verde-800">¿Ya tenés certificados?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Mirá sus vencimientos, descargalos y renová uno o varios a la vez.</p>
+              </div>
+              <Button asChild size="lg" className="rounded-lg">
+                <Link to="/pagar/fitosanitarios/mis-certificados">Mis certificados <ArrowRight className="size-4" /></Link>
+              </Button>
+            </section>
             <Recuperar />
           </motion.div>
         )}
@@ -256,14 +340,14 @@ export default function Fitosanitarios() {
             </p>
             <ul className="mt-5 flex flex-col gap-3">
               {existentes.map((x) => (
-                <li key={x.token} className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+                <li key={x.numero} className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-medium text-verde-800">{x.tipoNombre}</p>
                     <p className="text-sm text-muted-foreground">
                       {x.numero} · {etiquetasEstado[x.estado]} · {fechaHora(x.actualizadaEn)}
                     </p>
                   </div>
-                  <Button className="rounded-lg" onClick={() => navigate(`/pagar/fitosanitarios/solicitud/${x.token}`)}>
+                  <Button className="rounded-lg" disabled={ocupado} onClick={() => continuar(x.numero)}>
                     Continuar <ArrowRight className="size-4" />
                   </Button>
                 </li>
