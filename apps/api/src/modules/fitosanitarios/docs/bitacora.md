@@ -36,3 +36,21 @@ commiteado ni corrido en el servidor**. **El pago NO está implementado.**
 
 ## Decisiones del dueño del proyecto (resumen)
 Registro desde cero (sin cargar certificados en papel) · varios representantes por empresa · todo alta pasa por técnico · bajas: cada uno a sí mismo libre, a otro con técnico · certificados 12 meses · renovación paga la tasa de nuevo y va a revisión si hay documento vencido, cambio de datos o documento nuevo · renovación anticipada vale desde el vencimiento anterior, tardía desde la emisión · poder firmado en PDF, sin escribano, no vence · avisos al mail de la solicitud del último certificado · VTV con vencimiento · tasas mock editables por Recaudaciones desde el panel financiero · Ecodatos lo mantiene el mismo dueño del proyecto.
+
+## Revisión externa (Claude web, sobre el commit 156e12c) — 2026-10-31
+Se corrigió casi todo (migraciones 0010/0011, bugs del código, README). Detalle de lo hecho:
+trigger de revocación que recalcula `vence_en`, `setval` de `fito_registro_nro_seq`, chequeo de columnas obligatorias de Ecodatos en 0010,
+stub local con las columnas reales, chequeo de migraciones al arrancar la API, tarifas con 409, VTV vencida rechazada,
+vigencia de 12 meses exactos, avisos a representantes activos, guardas de producción y CORS, `migrate.ts` con candado y URL obligatoria.
+
+### Decisiones que faltan (contesta el dueño del proyecto)
+1. **Fila real en `fitosanitarios_domisanitarios_rows.json`** ("Soluciones Integrales", `anio_pago_registro` = 2026): con ella 0010 aborta. ¿Se borra en el servidor (si es de prueba) o se migra?
+2. **Sacar ese JSON del repo** (`git rm`): es un dump de Ecodatos con `user_id` y coordenadas; el historial de git lo conserva.
+3. **`formulario_id`** (y otras columnas de Ecodatos): si la plataforma lista los registros filtrando por `formulario_id`, los objetos que crea la botonera no aparecen. Lo define quien mantiene Ecodatos.
+4. Opcional: `pg_dump -s -t public.fitosanitarios_domisanitarios -t public.tipos_fito_domi` de Ecodatos para regenerar `db/local/ecodatos-stub.sql` con el esquema real.
+
+### Pendientes de esa revisión que NO se hicieron
+- Limpieza de archivos huérfanos en Storage (suben antes de la transacción) en el cron.
+- `consultarEstado` en el contrato de pagos (documentado como pendiente).
+- Categoría distinta: home "Registros y certificados" vs `pagos.categorias` "Fitosanitarios".
+- Aviso en el panel de técnicos si el DNI/CUIT de un alta ya tiene titular (con N representantes) antes de aprobar.
