@@ -1,5 +1,5 @@
 /**
- * Renovación de certificados (README-titulares-y-certificados.md, 4.4).
+ * Renovación de certificados (apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md, 4.4).
  *
  * Una solicitud de renovación por certificado, precargada con los datos del titular y del objeto y
  * con los documentos del certificado anterior. Se pueden renovar varios a la vez. Si no cambia nada
@@ -10,9 +10,8 @@ import { REPRESENTA_TITULAR, type RenovacionResponse } from '@botonera/shared';
 import { pool } from '../../db.js';
 import { ErrorSolicitud, cambiarEstado, configModulo, enTransaccion, type FilaSolicitud } from './solicitudes.js';
 import { titularesPorIds, titularesDeMail } from './titulares.js';
+import { CLAVE_ETIQUETA, sinAcentos } from './certificados.js';
 
-const sinAcentos = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-const CLAVE_ETIQUETA: Record<string, string> = { vehiculo: 'dominio', comercio: 'direccion-local', deposito: 'direccion-deposito', fraccionamiento: 'direccion-planta' };
 
 interface Fuente {
   tipo: string;

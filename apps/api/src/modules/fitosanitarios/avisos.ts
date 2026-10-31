@@ -1,5 +1,5 @@
 /**
- * Tareas diarias (las corre `apps/api/scripts/avisos.ts` desde el cron del servidor):
+ * Tareas diarias (las corre `tareas.ts` desde el cron del servidor):
  *   1) Avisos de vencimiento de certificados, una vez por umbral (30 días, 7 días y al vencer).
  *   2) Aprobaciones sin pago vencidas pasan a `vencida` (la lectura ya las muestra así; esto deja el historial).
  *   3) Limpieza de sesiones y enlaces viejos.
@@ -19,13 +19,29 @@ export function umbralDeAviso(dias: number, avisosDias: number[]): number {
   return orden.find((a) => a >= dias) ?? -1;
 }
 
+function asuntoAviso(lista: { numero: string; vencido: boolean }[]): string {
+  const todos = lista.every((p) => p.vencido);
+  const ninguno = lista.every((p) => !p.vencido);
+  if (lista.length === 1) return `Tu certificado ${lista[0].numero} ${todos ? 'venció' : 'está por vencer'}`;
+  return todos ? `${lista.length} certificados vencieron` : ninguno ? `${lista.length} certificados están por vencer` : `${lista.length} certificados vencen o ya vencieron`;
+}
+
 export async function procesarAvisosVencimiento(): Promise<{ nuevos: number; mails: number; fallidos: number }> {
   const cfg = await configRenovacion();
   const maximo = Math.max(...cfg.avisosDias, 0);
   const { rows: candidatos } = await pool.query<{ id: string; dias: number; email: string | null }>(
-    `select c.id, c.dias_para_vencer as dias, so.email
+    // Destinatario: el mail de la solicitud si sigue siendo representante; si lo dieron de baja,
+    // los representantes que quedan (el aviso no le llega a quien ya no representa al titular).
+    `select c.id, c.dias_para_vencer as dias, e.email
        from public.fito_certificados_estado c
-       left join pagos.fito_solicitudes so on so.id = c.solicitud_id
+       join pagos.fito_solicitudes so on so.id = c.solicitud_id
+       cross join lateral (
+         select v.email from public.fito_vinculos v
+          where v.titular_id = c.titular_id and v.baja_en is null
+            and (v.email_canonico = so.email_canonico
+                 or not exists (select 1 from public.fito_vinculos w
+                                 where w.titular_id = c.titular_id and w.baja_en is null and w.email_canonico = so.email_canonico))
+       ) e
       where c.revocado_en is null
         and not exists (select 1 from public.fito_certificados x where x.renovado_de = c.id)
         and c.dias_para_vencer <= $1 and c.dias_para_vencer >= -$2::int`,
@@ -36,7 +52,7 @@ export async function procesarAvisosVencimiento(): Promise<{ nuevos: number; mai
     const umbral = umbralDeAviso(c.dias, cfg.avisosDias);
     if (umbral < 0 || !c.email) continue;
     const r = await pool.query(
-      'insert into pagos.fito_avisos_vencimiento (certificado_id, dias_antes, email) values ($1, $2, $3) on conflict (certificado_id, dias_antes) do nothing',
+      'insert into pagos.fito_avisos_vencimiento (certificado_id, dias_antes, email) values ($1, $2, $3) on conflict (certificado_id, dias_antes, email) do nothing',
       [c.id, umbral, c.email],
     );
     nuevos += r.rowCount ?? 0;
@@ -44,9 +60,9 @@ export async function procesarAvisosVencimiento(): Promise<{ nuevos: number; mai
 
   // Todo lo que está sin enviar (incluye reintentos de mails que fallaron).
   const { rows: pendientes } = await pool.query<{
-    id: string; email: string; dias_antes: number; numero: string; vence_en: string; etiqueta: string | null; tipo: string | null;
+    id: string; email: string; dias_antes: number; numero: string; vence_en: string; vencido: boolean; etiqueta: string | null; tipo: string | null;
   }>(
-    `select a.id::text, a.email, a.dias_antes, c.numero, c.vence_en::text, r.objeto_etiqueta as etiqueta, t.nombre as tipo
+    `select a.id::text, a.email, a.dias_antes, c.numero, c.vence_en::text, c.vence_en < public.fito_hoy() as vencido, r.objeto_etiqueta as etiqueta, t.nombre as tipo
        from pagos.fito_avisos_vencimiento a
        join public.fito_certificados c on c.id = a.certificado_id
        join public.fitosanitarios_domisanitarios r on r.id = c.registro_id
@@ -61,11 +77,11 @@ export async function procesarAvisosVencimiento(): Promise<{ nuevos: number; mai
   let fallidos = 0;
   for (const [email, lista] of porMail) {
     const linea = (p: (typeof lista)[number]) =>
-      `• ${[p.tipo, p.etiqueta].filter(Boolean).join(' ')} (${p.numero}): ${p.dias_antes === 0 ? 'vence o ya venció' : `vence en ${p.dias_antes} días o menos`}, el ${p.vence_en.split('-').reverse().join('/')}.`;
+      `• ${[p.tipo, p.etiqueta].filter(Boolean).join(' ')} (${p.numero}): ${p.vencido ? 'venció' : p.dias_antes === 0 ? 'vence hoy' : `vence en ${p.dias_antes} días o menos`}, el ${p.vence_en.split('-').reverse().join('/')}.`;
     const ok = await avisar({
       para: email,
-      asunto: lista.length === 1 ? `Tu certificado ${lista[0].numero} está por vencer` : `${lista.length} certificados están por vencer`,
-      titulo: 'Certificados por vencer',
+      asunto: asuntoAviso(lista),
+      titulo: lista.every((p) => p.vencido) ? 'Certificados vencidos' : 'Certificados por vencer',
       parrafos: [
         'Estos certificados de fitosanitarios y domisanitarios están por vencer o ya vencieron:',
         ...lista.map(linea),

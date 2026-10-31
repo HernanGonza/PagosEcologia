@@ -1,7 +1,7 @@
 /**
  * Parte pública de las solicitudes: sin cuenta. La persona verifica su mail con un código, crea la
  * solicitud y entra con una sesión (cookie HttpOnly). Para volver, canjea un enlace de un solo uso
- * que le llega por mail (`POST /sesion`). Ver README-mails-y-seguridad.md.
+ * que le llega por mail (`POST /sesion`). Ver apps/api/src/modules/fitosanitarios/docs/mails-y-seguridad.md.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
@@ -136,7 +136,7 @@ async function conSesion(req: Request, res: Response, next: NextFunction) {
 const solicitudDe = (res: Response) => res.locals.solicitud as FilaSolicitud;
 export const clienteDe = (req: Request) => ({ ip: ipDe(req), userAgent: req.get('user-agent') });
 
-/** Fecha de vencimiento AAAA-MM-DD, entre hace 10 años y dentro de 30. Null si no se pide. */
+/** Fecha de vencimiento AAAA-MM-DD: de hoy (Argentina) a 30 años. Un documento ya vencido no sirve. Null si no se pide. */
 function leerVencimiento(valor: string | undefined, obligatoria: boolean): string | null {
   const v = (valor ?? '').trim();
   if (!v) {
@@ -145,9 +145,11 @@ function leerVencimiento(valor: string | undefined, obligatoria: boolean): strin
   }
   const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null;
   const ahora = Date.now();
-  if (!d || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v || d.getTime() < ahora - 10 * 365 * 864e5 || d.getTime() > ahora + 30 * 365 * 864e5) {
+  if (!d || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v || d.getTime() > ahora + 30 * 365 * 864e5) {
     throw new ErrorSolicitud(400, 'La fecha de vencimiento no es válida.');
   }
+  const hoyAr = new Date(ahora - 3 * 3600e3).toISOString().slice(0, 10); // Argentina es UTC-3 todo el año
+  if (v < hoyAr) throw new ErrorSolicitud(400, 'El documento está vencido: cargá uno vigente con su nueva fecha de vencimiento.');
   return v;
 }
 

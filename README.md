@@ -39,7 +39,7 @@ La base de la botonera va a vivir en el **Supabase self-hosted de Ecodatos**, el
 - El front nunca habla con Supabase: todo pasa por la API. El schema no se expone en PostgREST y tiene RLS activado por prevención.
 - Las credenciales no están en el repo. Cada quien arma su `.env` a partir de `.env.example` y las pide al dueño del proyecto.
 - Las migraciones de `db/migrations/` las corre el dueño del proyecto con `npm run migrate` (rol `postgres`, `MIGRATIONS_DATABASE_URL`). Quedan registradas en `pagos._migraciones`.
-- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` lee y mantiene el registro de fitosanitarios (`fitosanitarios_domisanitarios`, `fito_titulares`, `fito_vinculos`, `fito_certificados`; ver `README-titulares-y-certificados.md`) y lee `tipos_fito_domi`. También lee las tablas de permisos de Ecodatos (`areas`, `formularios`, `usuarios_areas`, `usuarios_formularios`, `roles`, `usuarios_rol`, `profiles`) para saber quién entra a cada panel de área (`0006_permisos_ecodatos.sql`).
+- La API entra con el rol `botonera` (`DATABASE_URL`): escribe en `pagos` y en `public` lee y mantiene el registro de fitosanitarios (`fitosanitarios_domisanitarios`, `fito_titulares`, `fito_vinculos`, `fito_certificados`; ver `apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md`) y lee `tipos_fito_domi`. También lee las tablas de permisos de Ecodatos (`areas`, `formularios`, `usuarios_areas`, `usuarios_formularios`, `roles`, `usuarios_rol`, `profiles`) para saber quién entra a cada panel de área (`0006_permisos_ecodatos.sql`).
 - **Storage:** los documentos de las solicitudes van a buckets privados del mismo Supabase (`fitosanitarios`, creado en `0005`). Solo la API sube y firma enlaces, con `SUPABASE_SERVICE_ROLE_KEY`; esa clave nunca va a un front.
 - **Auth:** los paneles de área (`apps/paneles`) usan el login de Ecodatos (Supabase Auth, mail y contraseña) con la anon key, que es pública. La API valida cada token contra Supabase y calcula los permisos.
 
@@ -122,7 +122,7 @@ Cada módulo suma sus propias tablas con prefijo (`apeo_actas`, `fito_certificad
 ### 📌 Decisiones fijadas
 
 1. El front nunca habla con la base. Todo pasa por la API, que se conecta por `pg` directo, sin exponer el schema en PostgREST. RLS activado igual, por prevención.
-2. Proveedor de pago como interfaz (`crearPago`, `webhook`, `consultarEstado`). Ningún módulo conoce al proveedor.
+2. Proveedor de pago como interfaz (hoy `crearPago` y `procesarWebhook`; `consultarEstado` — para reconciliar pagos sin webhook — está pendiente). Ningún módulo conoce al proveedor.
 3. **Sin login para el público.** Quien entra a pagar no crea cuenta ni inicia sesión. Cuando el trámite lo exige, se identifica con su CUIT/CUIL y el módulo lo valida contra un registro (ver [Acceso sin login](#-acceso-sin-login)). El login existe solo para el panel `/admin`.
 4. Montos y estados se calculan y validan solo en el back. El front nunca manda un monto.
 5. Webhooks idempotentes y conciliación diaria (es plata pública).
@@ -174,7 +174,7 @@ Si no coinciden, el panel no asocia los pagos al trámite.
 
 ### Paso 1 · Migración
 
-Creá `db/migrations/NNNN_<slug>.sql` con el número siguiente al último (hoy el último es `0004`). Las migraciones corren en orden alfabético, una sola vez cada una, y quedan registradas en `pagos._migraciones`.
+Creá `db/migrations/NNNN_<slug>.sql` con el número siguiente al último (hoy el último es `0011`; mirá `db/migrations/`). Las migraciones corren en orden alfabético, una sola vez cada una, y quedan registradas en `pagos._migraciones`.
 
 > ⚠️ **Nunca edites una migración que ya se aplicó**: no vuelve a correr. Para corregir algo, hacé una migración nueva.
 
@@ -298,7 +298,7 @@ Reglas del back (no son opcionales):
 - **Validar formato** de cada dato (largo, dígitos, CUIT con dígito verificador) y responder `400` con un mensaje claro en castellano.
 - **Datos mínimos**: si el trámite consulta un registro, devolver solo lo necesario para que la persona confirme (razón social, estado). Nunca domicilio, teléfono ni documentos.
 - **Si falta algo de configuración** (tarifa sin cargar, columna que el área todavía no agregó), responder `503` con un mensaje, no inventar valores.
-- Si el módulo escribe en `public`, que sea solo en las columnas que le dio la migración, y dejando registro en su tabla propia (qué había antes y qué quedó), como `pagos.fito_renovaciones`.
+- Si el módulo escribe en `public`, que sea solo en las columnas que le dio la migración, y dejando registro en su tabla propia (qué había antes y qué quedó), como el historial de la solicitud (`pagos.fito_historial`) o la auditoría.
 - Endpoints que cambian datos van por `POST`; los de consulta, por `GET`.
 
 ### Paso 3 · Front
@@ -326,7 +326,7 @@ Reglas del back (no son opcionales):
    ```
 
 4. **Llamar a la API:** con `fetch('/api/<slug>/...')`. En desarrollo, Vite manda `/api` a la API (puerto 3001).
-5. **Datos de prueba**, si la API todavía no puede responder: en un archivo aparte dentro de la carpeta del módulo (como `fitosanitarios/demo.ts`), marcado como demostración. Nunca se usan para cobrar.
+5. **Datos de prueba**, si la API todavía no puede responder: en un archivo aparte dentro de la carpeta del módulo (un `demo.ts` dentro de la carpeta del módulo; fitosanitarios no tiene), marcado como demostración. Nunca se usan para cobrar.
 
 ### Paso 4 · Tipos compartidos (si hace falta)
 
@@ -425,7 +425,7 @@ Con eso, cada trámite cae en uno de estos casos:
 ### Reglas que no cambian
 
 - **La decisión la toma el back.** El front solo muestra y recolecta; nunca decide si se puede pagar ni manda un monto.
-- **Todo trámite lleva CAPTCHA**, también los libres. El back lo verifica antes de validar nada.
+- **Todo trámite genérico lleva CAPTCHA**, también los libres (pendiente en fitosanitarios). El back lo verifica antes de validar nada.
 - **Los datos se consultan solo si el trámite lo necesita.** Un trámite libre no toca la base.
 - **Antes de pagar se muestra lo mínimo.** Sin sesión, saber un CUIT no prueba identidad: la consulta devuelve solo lo necesario para que la persona confirme (razón social, estado), nunca datos sensibles.
 - **Se revalida al pagar.** Al crear la orden de pago y al recibir el webhook, el back vuelve a comprobar los requisitos y recalcula el monto.
@@ -450,14 +450,14 @@ interface ConfigModulo {
 | `CalculoMonto` | `fijo` · `formula` (base + valor de campo × factor) · `escala` (importe según el tramo del campo) · `deuda` (el monto de la deuda encontrada). Ninguno lleva números: cada `concepto` apunta a una `Tarifa`. |
 | `Tarifa` | Valor (importe o tramos) de un concepto, con `vigente_desde`. Se edita desde el panel; rige la última vigente a la fecha del cálculo y las anteriores se conservan. |
 
-**Validación.** `POST /api/modulos/:slug/validar` recibe `{ datos, captcha }`. **El CAPTCHA es obligatorio en todos los trámites**, también los libres; el back lo verifica antes de cualquier otra cosa:
+**Validación.** `POST /api/modulos/:slug/validar` recibe `{ datos, captcha }`. **El CAPTCHA es obligatorio en todos los trámites genéricos**, también los libres (el módulo de fitosanitarios aún no lo aplica); el back lo verifica antes de cualquier otra cosa:
 
 - Si cumple: `{ ok: true, monto, tarifas, datosMinimos?, validacionId }`. El monto lo calcula el back; `tarifas` son las versiones usadas, que se guardan en la orden.
 - Si no: `{ ok: false, motivo, mensaje, errores? }`. Motivos: `datos_invalidos`, `no_registrado`, `no_habilitado`, `sin_deuda`, `captcha_invalido`, `limite_consultas`.
 
 **Resolver.** Los trámites con `registro` o `deuda` implementan `Resolver.consultar(datos)` en `apps/api/src/modules/<slug>/resolver.ts`. Devuelve si encontró algo y los `DatosMinimos` (titular, estado, concepto), nunca domicilio ni teléfono. Para `deuda`, además el monto.
 
-> El contrato se está definiendo con el módulo de fitosanitarios. La consulta API ya tiene endpoint propio; el flujo público de interfaz sigue usando datos de demostración.
+> El contrato se está definiendo con el módulo de fitosanitarios. Los tipos de monto que hoy usa son `fijo` y `segun-opcion` (un concepto de tarifa por opción elegida), y el requisito `revision` (aprobación técnica antes del pago); las tablas de arriba todavía no los incluyen. La consulta API ya tiene endpoint propio; el flujo público de interfaz sigue usando datos de demostración.
 
 El detalle de los niveles de validación y sus resguardos (anti-abuso, datos mínimos) está en [Acceso sin login](#-acceso-sin-login).
 
@@ -532,12 +532,12 @@ Reglas:
 Para trámites donde el área controla requisitos antes de cobrar (hoy, fitosanitarios). **La persona no crea cuenta:**
 
 1. Elige el tipo (vehículo, comercio, depósito…), pone su mail y confirma un código de 6 dígitos (vale 15 min, 5 intentos; máximo 5 códigos por mail y 20 por IP por hora).
-2. Se crea la solicitud y la persona entra con una **sesión** (cookie `HttpOnly`: 30 min de inactividad, 4 h máximo). Para volver le llega por mail un **enlace de un solo uso** (`/pagar/fitosanitarios/solicitud#<token>`); cada mail lleva uno nuevo que anula los anteriores. Si lo pierde o venció, pide otro con su mail y un código. Todo el detalle (flujos, vigencias, seguridad y límites) está en [`README-mails-y-seguridad.md`](README-mails-y-seguridad.md). El pago todavía no está implementado.
+2. Se crea la solicitud y la persona entra con una **sesión** (cookie `HttpOnly`: 30 min de inactividad, 4 h máximo). Para volver le llega por mail un **enlace de un solo uso** (`/pagar/fitosanitarios/solicitud#<token>`); cada mail lleva uno nuevo que anula los anteriores. Si lo pierde o venció, pide otro con su mail y un código. Todo el detalle (flujos, vigencias, seguridad y límites) está en [`apps/api/src/modules/fitosanitarios/docs/mails-y-seguridad.md`](apps/api/src/modules/fitosanitarios/docs/mails-y-seguridad.md). El pago todavía no está implementado.
 3. Carga datos y documentos (PDF, JPG o PNG, hasta 10 MB; el tipo se comprueba por contenido). No puede enviar hasta cumplir todos los requisitos.
 4. Los técnicos la ven en su panel: la **toman**, la **aprueban**, la **observan** (por requisito o en general) o la **rechazan** con un motivo. Cada acción le avisa por mail y queda en el historial y en la auditoría.
 5. Si está observada, corrige lo marcado y la reenvía. Aprobada, tiene `aprobacionDias` (30) para pagar; si no, vence.
 
-Estados: `borrador` → `enviada` → `en_revision` → `observada` / `aprobada` / `rechazada`; después `pagada` → `emitida`, o `vencida`. Los tipos, requisitos y plazos están en `modulos.config.solicitud` (ver `packages/shared/src/solicitudes.ts`); las reglas de validación son las mismas en el front y en el back.
+Estados: `borrador` → `enviada` → `en_revision` → `observada` / `aprobada` / `rechazada`; después `pagada` → `emitida`, o `vencida`. Los tipos, requisitos y plazos están en `modulos.config.solicitud` (ver `packages/shared/src/fitosanitarios/solicitudes.ts`); las reglas de validación son las mismas en el front y en el back.
 
 **Mail:** `apps/api/src/core/correo.ts` manda por Gmail (`GMAIL_USER`/`GMAIL_APP_PASSWORD`) o Microsoft Graph (`MS_*`, `MAIL_FROM`), igual que mapa-pronostico. Con `MAIL_PROVIDER=consola` los mails solo se muestran en el log de la API (desarrollo).
 
@@ -568,7 +568,7 @@ El catálogo genérico de ejemplo se retiró para empezar el primer módulo con 
 - `/pagar/fitosanitarios`: módulo propio de Registro de fitosanitarios y domisanitarios. Cada trámite conserva su flujo dentro de su carpeta y aporta una ficha a la botonera.
 - La pantalla muestra los tipos de certificado con sus requisitos e importe, pide el mail con código de verificación y lleva a la solicitud (ver [Solicitudes con revisión técnica](#-solicitudes-con-revisión-técnica)). Los técnicos la revisan en `apps/paneles`.
 - API propia: `/api/fitosanitarios/tipos`, `/codigo`, `/solicitudes/...` (persona, con su enlace privado) y `/api/fitosanitarios/panel/...` (técnicos, con sesión de Ecodatos).
-- Migraciones: `0001_pagos_base.sql` (núcleo), `0002_fitosanitarios.sql` (renovaciones; el registro se lee de `public.fitosanitarios_domisanitarios`), `0003_rol_botonera.sql` (rol de la API), `0004_config_fitosanitarios.sql` (config según `ConfigModulo`), `0005_solicitudes_fitosanitarios.sql` (solicitudes, documentos, observaciones, historial, códigos de verificación, bucket `fitosanitarios` y tipos y requisitos provisorios), `0006_permisos_ecodatos.sql` (lectura de los permisos de Ecodatos), `0007_revision_trazabilidad.sql` (quién tomó y quién resolvió cada solicitud; mail e IP en el historial). Falta que el área agregue DNI/CUIT y vencimiento en el registro.
+- Migraciones: `0001_pagos_base.sql` (núcleo), `0002_fitosanitarios.sql` (renovaciones; el registro se lee de `public.fitosanitarios_domisanitarios`), `0003_rol_botonera.sql` (rol de la API), `0004_config_fitosanitarios.sql` (config según `ConfigModulo`), `0005_solicitudes_fitosanitarios.sql` (solicitudes, documentos, observaciones, historial, códigos de verificación, bucket `fitosanitarios` y tipos y requisitos provisorios), `0006_permisos_ecodatos.sql` (lectura de los permisos de Ecodatos), `0007_revision_trazabilidad.sql` (quién tomó y quién resolvió cada solicitud; mail e IP en el historial). `0008_tipo_fraccionamiento.sql` (tipo Fraccionamiento), `0009_enlaces_y_sesiones.sql` (enlaces de un solo uso y sesiones), `0010_ecodatos_registro.sql` (**en Ecodatos**: titulares, vínculos, registro reconfigurado y historial de certificados) y `0011_titulares_y_renovaciones.sql` (renovaciones, vencimiento de documentos, avisos y tasas mock). Detalle y estado en `apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md`.
 - El pago todavía no está integrado a MacroClick ni emite certificados: la solicitud aprobada muestra el botón de pago deshabilitado.
 
 ### 📊 Panel de Recaudaciones (`apps/admin`)
@@ -576,7 +576,7 @@ El catálogo genérico de ejemplo se retiró para empezar el primer módulo con 
 - App aparte: Vite + React 19 + Tailwind v4 + shadcn (Radix) con componentes de [Watermelon UI](https://ui.watermelon.sh). Se suman con `npx shadcn@latest add @watermelon/<nombre>` desde `apps/admin`.
 - Base visual: el bloque `capitalio-dashboard`, que queda sin tocar en `src/components/watermelon/`; el panel propio vive en `src/panel/` y reutiliza su CSS, tarjetas, tooltips e íconos.
 - Pantallas: Resumen (indicadores, recaudación por día/mes, por trámite, últimos pagos), Pagos y órdenes (filtros, búsqueda, paginado, CSV), Trámites y tarifas, Auditoría. Conciliación y Reportes quedan como pendientes de definir.
-- API: `GET /api/admin/resumen?periodo=hoy|7d|30d|anio`, `/ordenes`, `/tramites`, `/auditoria` (tipos en `packages/shared/src/admin.ts`).
+- API: `GET /api/admin/resumen?periodo=hoy|7d|30d|anio`, `/ordenes`, `/tramites`, `/auditoria` y `POST /tarifas` (agrega una versión de tarifa con fecha de vigencia; 409 si ya hay una para esa fecha) (tipos en `packages/shared/src/admin.ts`).
 - **Login preparado, sin conectar:** `/login` (adaptado de Watermelon `auth-11`) deja entrar sin completar nada. Todo pasa por `src/panel/sesion.tsx` (`LOGIN_CONECTADO`, `iniciarSesion`, `RequiereSesion`); conectar el login es cambiar ese archivo y el middleware de `apps/api/src/routes/admin.ts`. Tipos de usuario y roles en `packages/shared/src/admin.ts`.
 - `/api/admin` responde solo con `ADMIN_SIN_LOGIN=true`, y eso es solo para desarrollo local.
 
@@ -605,10 +605,9 @@ Para las solicitudes, el `.env` necesita además `SUPABASE_URL`, `SUPABASE_SERVI
 - Relevar campos y estados oficiales del registro, cómo se determina la habilitación y el formato del certificado.
 - Confirmar los tipos de certificado, sus requisitos, tasas y plazos (las preguntas están en el relevamiento, sección 7). Los de `0005` son provisorios.
 - Avisar a los técnicos cuando entra una solicitud nueva (hoy la ven al entrar al panel).
-- Importar y depurar el Excel de titulares y certificados en las tablas propias mediante un proceso controlado.
-- Configurar la tarifa oficial desde administración y conectar el importe calculado por API con una orden de pago.
+- Conectar el importe calculado por API con una orden de pago. La edición de tarifas ya existe en el panel financiero (`POST /api/admin/tarifas`); falta el login de ese panel.
 - Confirmar pago con el proveedor y emitir/guardar el certificado definitivo de un año.
-- Acordar CAPTCHA y límite de consultas antes de exponer la búsqueda pública.
+- Acordar CAPTCHA y límite de consultas antes de exponer la búsqueda pública. (Fitosanitarios todavía **no tiene CAPTCHA**; se protege con código por mail y topes por IP y casilla.)
 - Manual técnico y credenciales de MacroClick; panel `/admin` y funcionalidades generales de Recaudaciones.
 
 ## 📋 Herramienta de relevamiento (local)
@@ -632,6 +631,6 @@ Una terminal por comando, todas desde la raíz del repo:
 | `npm run dev:paneles` | Panel de área: el técnico revisa la solicitud | http://localhost:5176 |
 | `npm run dev:admin` | Panel de Recaudaciones: pagos y trámites | http://localhost:5174 |
 
-Orden del flujo: **web** (solicitud) → **paneles** (revisión) → **web** (pago, con el proveedor `mock`) → **admin** (se ve el pago). Levantar primero `dev:api`.
+Orden del flujo hoy: **web** (solicitud) → **paneles** (revisión y aprobación). El pago no está integrado: para ver el resto, con `EMISION_SIMULADA=1` en el `.env`, `POST /api/fitosanitarios/dev/emitir/<número>` simula el pago y emite el certificado (después se ve en *Mis certificados* y se verifica con el QR). Levantar primero `dev:api`.
 
 Para correr los cuatro juntos en una sola terminal: `npm run dev`.

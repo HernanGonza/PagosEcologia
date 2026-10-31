@@ -1,5 +1,5 @@
 /**
- * Tablero de la persona (README-titulares-y-certificados.md, 4.3 y 6.1): con el mail verificado ve los
+ * Tablero de la persona (apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md, 4.3 y 6.1): con el mail verificado ve los
  * titulares de los que es representante, sus certificados, vencimientos e historial, y renueva.
  * La búsqueda por DNI/CUIT NO es pública: solo se ve lo vinculado a este mail.
  */

@@ -53,7 +53,6 @@ if (local) {
     SUPABASE_ANON_KEY: '',
     VITE_SUPABASE_URL: '',
     VITE_SUPABASE_ANON_KEY: '',
-    DATABASE_SSL: 'false',
     STORAGE_LOCAL_DIR: path.join(raiz, '.local/storage'),
     AUTH_LOCAL: 'true',
     VITE_AUTH_LOCAL: 'true',

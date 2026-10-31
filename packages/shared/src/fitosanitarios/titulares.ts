@@ -1,5 +1,5 @@
 /**
- * Titulares, objetos registrados y certificados (README-titulares-y-certificados.md).
+ * Titulares, objetos registrados y certificados (apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md).
  * El registro vive en Ecodatos; las definiciones de estado están en SQL (`fito_estado_*`) y acá
  * solo se nombran los valores que devuelve.
  */

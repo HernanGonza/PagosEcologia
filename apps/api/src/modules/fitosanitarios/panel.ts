@@ -370,16 +370,20 @@ panelRouter.post('/certificados/:id/revocar', edicion, async (req, res, next) =>
     const yo = quien(req);
     const motivo = String(req.body?.motivo ?? '').trim().slice(0, 500);
     if (!motivo) throw new ErrorSolicitud(400, 'Indicá el motivo de la revocación.');
-    const { rows } = await pool.query<{ id: string }>(
-      `update public.fito_certificados set revocado_en = now(), revocado_motivo = $2, revocado_por = $3
-        where id = $1 and revocado_en is null returning id`,
-      [/^[0-9a-f-]{36}$/i.test(String(req.params.id)) ? String(req.params.id) : '00000000-0000-0000-0000-000000000000', motivo, `${yo.nombre} <${yo.email}>`],
-    );
-    if (!rows[0]) throw new ErrorSolicitud(404, 'El certificado no existe o ya estaba revocado.');
-    await pool.query(
-      "insert into pagos.auditoria (actor, accion, entidad, entidad_id, despues) values ($1, 'revocar', 'fito_certificado', $2, $3)",
-      [`ecodatos:${yo.email}`, rows[0].id, { motivo, ip: yo.ip }],
-    );
+    const id = /^[0-9a-f-]{36}$/i.test(String(req.params.id)) ? String(req.params.id) : '00000000-0000-0000-0000-000000000000';
+    // Revocación y auditoría en una sola transacción: no queda una sin la otra.
+    await enTransaccion(async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        `update public.fito_certificados set revocado_en = now(), revocado_motivo = $2, revocado_por = $3
+          where id = $1 and revocado_en is null returning id`,
+        [id, motivo, `${yo.nombre} <${yo.email}>`],
+      );
+      if (!rows[0]) throw new ErrorSolicitud(404, 'El certificado no existe o ya estaba revocado.');
+      await client.query(
+        "insert into pagos.auditoria (actor, accion, entidad, entidad_id, despues) values ($1, 'revocar', 'fito_certificado', $2, $3)",
+        [`ecodatos:${yo.email}`, rows[0].id, { motivo, ip: yo.ip }],
+      );
+    });
     res.json({ ok: true });
   } catch (e) {
     next(e);

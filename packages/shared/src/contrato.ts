@@ -109,7 +109,7 @@ export interface ValidarRequest {
 export type ValidarResponse =
   | {
       ok: true;
-      /** Monto calculado por el back, en pesos. */
+      /** Monto calculado por el back, en CENTAVOS (como las tarifas). */
       monto: number;
       /** Versiones de tarifa usadas; se guardan en la orden. Vacío si el monto viene de la deuda. */
       tarifas: TarifaAplicada[];

@@ -1,7 +1,7 @@
 /**
  * Titulares, vínculos mail ↔ titular, objetos registrados y certificados.
  * El registro vive en Ecodatos (`public`, migración 0010); la solicitud y los pagos en `pagos`.
- * Ver README-titulares-y-certificados.md.
+ * Ver apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md.
  */
 import type { PoolClient } from 'pg';
 import {
@@ -299,12 +299,12 @@ export async function buscarTitulares(q: string): Promise<{ criterio: string; fi
     `select distinct t.id from public.fito_titulares t
        left join public.fitosanitarios_domisanitarios r on r.titular_id = t.id
        left join public.fito_certificados c on c.titular_id = t.id
-      where ($1 <> '' and (t.dni = $1 or t.cuit = $1 or r.nro_registro::text = $1))
+      where ($1 <> '' and (t.dni = $1 or t.cuit = $1 or r.nro_registro::text = $3))
          or lower(t.nombre) like $2
          or lower(r.objeto_etiqueta) like $2
          or lower(c.numero) like $2
       limit 50`,
-    [digitos.length >= 7 ? digitos : '', patron],
+    [digitos.length >= 7 ? digitos : '', patron, esNumero && digitos.length < 7 ? String(Number(digitos)) : ''],
   );
   const titulares = await titularesPorIds(rows.map((r) => r.id));
   const filas = titulares.map(

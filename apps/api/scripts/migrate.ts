@@ -6,12 +6,15 @@ import path from 'node:path';
 import pg from 'pg';
 
 const dir = fileURLToPath(new URL('../../../db/migrations/', import.meta.url));
-const url = process.env.MIGRATIONS_DATABASE_URL || process.env.DATABASE_URL;
-if (!url) throw new Error('Falta MIGRATIONS_DATABASE_URL en el .env');
+// Solo MIGRATIONS_DATABASE_URL: DATABASE_URL es el rol `botonera`, que no puede crear tablas ni dar permisos.
+const url = process.env.MIGRATIONS_DATABASE_URL;
+if (!url) throw new Error('Falta MIGRATIONS_DATABASE_URL en el .env (usuario postgres, no el rol botonera).');
 
 const client = new pg.Client({ connectionString: url });
 await client.connect();
 try {
+  // Un solo migrador a la vez.
+  await client.query('select pg_advisory_lock(727001)');
   await client.query(`create schema if not exists pagos`);
   await client.query(
     `create table if not exists pagos._migraciones (

@@ -1,6 +1,6 @@
 -- ============================================================================================
 -- ECODATOS (esquema public) — registro de titulares, vínculos y certificados.
--- Diseño: README-titulares-y-certificados.md, secciones 3.0 a 3.3.
+-- Diseño: apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md, secciones 3.0 a 3.3.
 --
 -- Esta migración toca tablas de la plataforma Ecodatos (public). La corre quien mantiene Ecodatos
 -- (como `postgres`, igual que el resto). Es la ÚNICA que cambia public.fitosanitarios_domisanitarios.
@@ -24,6 +24,20 @@ do $$
 begin
   if exists (select 1 from public.fitosanitarios_domisanitarios where anio_pago_registro is not null) then
     raise exception 'public.fitosanitarios_domisanitarios tiene filas con anio_pago_registro: revisar antes de reconfigurarla (esta migración asume la tabla sin datos de renovación).';
+  end if;
+  -- La API da de alta objetos con solo estas columnas. Si la tabla real de Ecodatos tiene otra columna
+  -- obligatoria y sin valor por defecto (ej. user_id o formulario_id), el alta fallaría recién al emitir.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'fitosanitarios_domisanitarios'
+       and is_nullable = 'NO' and column_default is null and is_generated = 'NEVER'
+       and column_name not in ('id', 'empresa', 'tipo_id', 'titular_id', 'objeto_etiqueta', 'datos', 'vtv_vence_en')
+  ) then
+    raise exception 'public.fitosanitarios_domisanitarios tiene columnas obligatorias sin valor por defecto (%): darles un default o permitir null antes de migrar.',
+      (select string_agg(column_name, ', ') from information_schema.columns
+        where table_schema = 'public' and table_name = 'fitosanitarios_domisanitarios'
+          and is_nullable = 'NO' and column_default is null and is_generated = 'NEVER'
+          and column_name not in ('id', 'empresa', 'tipo_id', 'titular_id', 'objeto_etiqueta', 'datos', 'vtv_vence_en'));
   end if;
 end $$;
 
@@ -114,6 +128,11 @@ alter table public.fitosanitarios_domisanitarios alter column empresa drop not n
 alter table public.fitosanitarios_domisanitarios drop column anio_pago_registro;
 
 create sequence public.fito_registro_nro_seq;
+-- Si ya hubiera registros numerados, la secuencia sigue desde el mayor (no choca con el índice único).
+select setval('public.fito_registro_nro_seq',
+              coalesce((select max(nullif(regexp_replace(nro_registro::text, '\D', '', 'g'), '')::bigint)
+                          from public.fitosanitarios_domisanitarios), 0) + 1,
+              false);
 
 alter table public.fitosanitarios_domisanitarios
   add column titular_id       uuid references public.fito_titulares(id),
@@ -131,8 +150,17 @@ alter table public.fitosanitarios_domisanitarios
   add column revocado_en      timestamptz,
   add column revocado_motivo  text;
 
-alter table public.fitosanitarios_domisanitarios
-  alter column nro_registro set default nextval('public.fito_registro_nro_seq');
+-- En Ecodatos `nro_registro` puede ser numérico o texto: el default se adapta al tipo real.
+do $$
+begin
+  if (select data_type from information_schema.columns
+       where table_schema = 'public' and table_name = 'fitosanitarios_domisanitarios' and column_name = 'nro_registro')
+     in ('text', 'character varying') then
+    alter table public.fitosanitarios_domisanitarios alter column nro_registro set default nextval('public.fito_registro_nro_seq')::text;
+  else
+    alter table public.fitosanitarios_domisanitarios alter column nro_registro set default nextval('public.fito_registro_nro_seq');
+  end if;
+end $$;
 create unique index fito_registro_nro_uq on public.fitosanitarios_domisanitarios (nro_registro) where nro_registro is not null;
 create index fito_registro_titular_idx on public.fitosanitarios_domisanitarios (titular_id);
 create index fito_registro_etiqueta_idx on public.fitosanitarios_domisanitarios (lower(objeto_etiqueta));
@@ -207,14 +235,17 @@ create or replace function public.fito_certificado_actualiza_registro() returns 
 language plpgsql as $$
 begin
   update public.fitosanitarios_domisanitarios r
-     set vence_en   = greatest(coalesce(r.vence_en, new.vence_en), new.vence_en),
+     set vence_en   = (select max(c.vence_en) from public.fito_certificados c
+                        where c.registro_id = new.registro_id and c.revocado_en is null),
          updated_at = now()
    where r.id = new.registro_id;
   return new;
 end $$;
 
+-- Al emitir (INSERT) y al revocar (UPDATE de revocado_en) el registro se recalcula: queda el
+-- vencimiento más tardío entre los certificados NO revocados, o null si ya no queda ninguno.
 create trigger fito_certificados_registro
-  after insert on public.fito_certificados
+  after insert or update of revocado_en on public.fito_certificados
   for each row execute function public.fito_certificado_actualiza_registro();
 
 -- 6) Estado: UNA sola definición (README 6.2) ----------------------------------------------------
@@ -301,7 +332,7 @@ grant update (baja_solicitada_en, baja_solicitada_por, baja_en, baja_por, baja_m
 grant select, insert on public.fito_certificados to botonera;
 grant update (revocado_en, revocado_motivo, revocado_por) on public.fito_certificados to botonera;
 
--- Registro: ya tenía select y update de una columna (0006). La columna `anio_pago_registro` se fue
+-- Registro: ya tenía select y update de una columna (0003). La columna `anio_pago_registro` se fue
 -- con el drop; ahora puede dar de alta objetos y mantener sus datos (no `vence_en`: eso lo hace el trigger).
 grant insert on public.fitosanitarios_domisanitarios to botonera;
 grant update (titular_id, tipo_id, objeto_etiqueta, datos, vtv_vence_en, revocado_en, revocado_motivo, activo)
@@ -327,7 +358,7 @@ begin
   end loop;
 end $$;
 
--- El registro ya tenía políticas de select y update (0006); falta la de alta.
+-- El registro ya tenía políticas de select y update (0003); falta la de alta.
 drop policy if exists botonera_alta on public.fitosanitarios_domisanitarios;
 create policy botonera_alta on public.fitosanitarios_domisanitarios
   for insert to botonera with check (true);

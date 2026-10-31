@@ -341,8 +341,7 @@ adminRouter.post('/tarifas', async (req, res, next) => {
       await client.query('begin');
       await client.query(
         `insert into pagos.tarifas (modulo_slug, concepto, valor, vigente_desde, creado_por)
-         values ($1, $2, $3::jsonb, $4::date, 'panel-financiero')
-         on conflict (modulo_slug, concepto, vigente_desde) do update set valor = excluded.valor, creado_por = excluded.creado_por`,
+         values ($1, $2, $3::jsonb, $4::date, 'panel-financiero')`,
         [moduloSlug, concepto, JSON.stringify(centavos), vigenteDesde],
       );
       await client.query(
@@ -352,6 +351,11 @@ adminRouter.post('/tarifas', async (req, res, next) => {
       await client.query('commit');
     } catch (e) {
       await client.query('rollback');
+      if ((e as { code?: string }).code === '23505') {
+        // Nunca se pisa una versión anterior: para cambiarla se carga otra con fecha distinta.
+        res.status(409).json({ error: 'Ya hay un valor cargado para esa fecha de vigencia. Elegí otra fecha.' });
+        return;
+      }
       throw e;
     } finally {
       client.release();

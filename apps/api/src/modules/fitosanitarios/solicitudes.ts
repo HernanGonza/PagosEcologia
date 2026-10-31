@@ -82,7 +82,7 @@ async function importeDeTipo(monto: CalculoMonto, tipo: string): Promise<number 
   if (!concepto) return null;
   const { rows } = await pool.query<{ valor: unknown }>(
     `select valor from pagos.tarifas
-      where modulo_slug = $1 and concepto = $2 and vigente_desde <= current_date
+      where modulo_slug = $1 and concepto = $2 and vigente_desde <= ${SQL_HOY}
       order by vigente_desde desc, id desc limit 1`,
     [MODULO, concepto],
   );
@@ -328,7 +328,9 @@ async function aplicarVencimiento(s: FilaSolicitud): Promise<FilaSolicitud> {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    await cambiarEstado(client, s, 'vencida', { actor: 'sistema', nota: 'La aprobación venció sin que se hiciera el pago.' });
+    // Con la fila bloqueada: dos lecturas simultáneas no duplican la entrada del historial.
+    const vigente = await client.query("select 1 from pagos.fito_solicitudes where id = $1 and estado = 'aprobada' for update", [s.id]);
+    if (vigente.rowCount) await cambiarEstado(client, s, 'vencida', { actor: 'sistema', nota: 'La aprobación venció sin que se hiciera el pago.' });
     await client.query('commit');
   } catch (e) {
     await client.query('rollback');

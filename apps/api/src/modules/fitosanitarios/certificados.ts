@@ -14,14 +14,14 @@ import { pool } from '../../db.js';
 import { ErrorSolicitud, cambiarEstado, configModulo, type Actor, type FilaSolicitud } from './solicitudes.js';
 
 /** Qué dato del trámite es la "etiqueta" del objeto (la patente, la dirección…). */
-const CLAVE_ETIQUETA: Record<string, string> = {
+export const CLAVE_ETIQUETA: Record<string, string> = {
   vehiculo: 'dominio',
   comercio: 'direccion-local',
   deposito: 'direccion-deposito',
   fraccionamiento: 'direccion-planta',
 };
 
-const sinAcentos = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+export const sinAcentos = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 /** El `tipo_id` del catálogo de Ecodatos (`tipos_fito_domi`) que corresponde al tipo del trámite. */
 async function tipoDeEcodatos(client: PoolClient, slug: string): Promise<string> {
@@ -131,7 +131,7 @@ export async function emitirCertificado(client: PoolClient, s: FilaSolicitud, ac
   const { rows: reg } = await client.query<{ tipo_id: string | null }>('select tipo_id from public.fitosanitarios_domisanitarios where id = $1', [registroId]);
   const { rows } = await client.query<{ id: string; numero: string; vigente_desde: string; vence_en: string; codigo_verificacion: string }>(
     `insert into public.fito_certificados (registro_id, titular_id, tipo_id, solicitud_id, orden_id, vigente_desde, vence_en, renovado_de)
-     values ($1, $2, $3, $4, null, $5::date, ($5::date + make_interval(months => $6::int))::date, $7)
+     values ($1, $2, $3, $4, null, $5::date, (($5::date + make_interval(months => $6::int))::date - 1), $7)
      returning id, numero, vigente_desde::text, vence_en::text, codigo_verificacion`,
     [registroId, s.titular_id, reg[0]?.tipo_id ?? null, s.id, vigenteDesde, meses, renovadoDe],
   );
@@ -172,7 +172,7 @@ export async function verificarPorCodigo(codigo: string): Promise<VerificacionPu
   };
 }
 
-export const urlVerificacion = (codigo: string) => `${(process.env.WEB_URL ?? 'http://localhost:5173').replace(/\/+$/, '')}/verificar/${codigo}`;
+export const urlVerificacion = (codigo: string) => `${(process.env.WEB_URL ?? 'http://localhost:5173').replace(/\/+$/, '')}/pagar/fitosanitarios/verificar/${codigo}`;
 
 // --- PDF con QR --------------------------------------------------------------------------------------
 

@@ -20,7 +20,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/pagar/fitosanitarios/solicitud" element={<FitosanitariosSolicitud />} />
           <Route path="/pagar/fitosanitarios/mis-certificados" element={<FitosanitariosMisCertificados />} />
           {/* Lo abre el QR del certificado. */}
-          <Route path="/verificar/:codigo" element={<FitosanitariosVerificar />} />
+          <Route path="/pagar/fitosanitarios/verificar/:codigo" element={<FitosanitariosVerificar />} />
           {/* Enlaces del formato anterior (token en la ruta): ya no valen. */}
           <Route path="/pagar/fitosanitarios/solicitud/:token" element={<Navigate to="/pagar/fitosanitarios?enlace=vencido" replace />} />
         </Routes>

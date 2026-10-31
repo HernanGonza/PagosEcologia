@@ -1,9 +1,9 @@
 -- Esquema `pagos`: lo que el trámite necesita para titulares, renovaciones y acceso por persona.
--- Diseño: README-titulares-y-certificados.md (3.4, 4.x, 6.1). El registro en sí vive en Ecodatos (0010).
+-- Diseño: apps/api/src/modules/fitosanitarios/docs/titulares-y-certificados.md (3.4, 4.x, 6.1). El registro en sí vive en Ecodatos (0010).
 --
 --   1) Solicitudes: tipo (alta | renovación), a qué titular / objeto / certificado se refieren.
 --   2) Documentos: vencimiento (VTV, etc.) y documentos arrastrados de una solicitud anterior.
---   3) Sesión de persona (por mail) y enlaces que llevan a un destino concreto (6.1).
+--   3) Sesión de persona (por mail + código).
 --   4) Registro de consultas al padrón por los técnicos (datos personales, Ley 25.326).
 --   5) Avisos de vencimiento enviados (para que el cron no repita mails).
 --   6) Configuración del módulo: renovación, VTV con vencimiento, poder firmado.
@@ -53,6 +53,7 @@ create index fito_documentos_vence_idx on pagos.fito_documentos (vence_en) where
 create index fito_documentos_origen_idx on pagos.fito_documentos (origen_documento_id) where origen_documento_id is not null;
 
 -- 3) Acceso por persona (mail verificado), además del acceso por solicitud ------------------------
+-- (Los enlaces de mail siguen atados a una solicitud; la persona entra con mail + código.)
 -- La sesión (cookie) pasa a poder estar atada a un MAIL en vez de a una solicitud.
 alter table pagos.fito_sesiones
   alter column solicitud_id drop not null,
@@ -65,14 +66,6 @@ update pagos.fito_sesiones s
  where so.id = s.solicitud_id;
 create index fito_sesiones_email_idx on pagos.fito_sesiones (email_canonico) where email_canonico is not null;
 
--- Un enlace de mail puede llevar a una solicitud o a una pantalla concreta del tablero
--- (ej. 'renovar:<certificado_id>'), canjeando una sesión de persona.
-alter table pagos.fito_enlaces
-  alter column solicitud_id drop not null,
-  add column email_canonico text,
-  add column destino        text,
-  add constraint fito_enlaces_dueno_ck check (solicitud_id is not null or email_canonico is not null);
-create index fito_enlaces_email_idx on pagos.fito_enlaces (email_canonico) where email_canonico is not null;
 
 -- 4) Consultas al padrón (panel de técnicos) -------------------------------------------------------
 create table pagos.fito_consultas_padron (
@@ -91,7 +84,7 @@ create index fito_consultas_actor_idx on pagos.fito_consultas_padron (actor_id, 
 create index fito_consultas_fecha_idx on pagos.fito_consultas_padron (created_at desc);
 
 -- 5) Avisos de vencimiento enviados ----------------------------------------------------------------
--- Una fila por (certificado, anticipación): el cron la inserta antes de mandar y no repite.
+-- Una fila por (certificado, anticipación, destinatario): el cron la inserta antes de mandar y no repite.
 create table pagos.fito_avisos_vencimiento (
   id             bigint generated always as identity primary key,
   certificado_id uuid not null,
@@ -101,7 +94,7 @@ create table pagos.fito_avisos_vencimiento (
   enviado_en     timestamptz,
   error          text,
   created_at     timestamptz not null default now(),
-  unique (certificado_id, dias_antes)
+  unique (certificado_id, dias_antes, email)
 );
 create index fito_avisos_pendientes_idx on pagos.fito_avisos_vencimiento (created_at) where enviado_en is null;
 

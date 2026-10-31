@@ -21,13 +21,26 @@ create table if not exists public.fitosanitarios_domisanitarios (
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
   activo             boolean not null default true,
-  orden              numeric,
+  -- Columnas de la tabla real de Ecodatos (según un registro exportado). Los números vienen como texto.
+  user_id            uuid,
+  created_by         uuid,
+  formulario_id      uuid,
+  latitud_decimal    numeric,
+  longitud_decimal   numeric,
+  latitud_gms        text,
+  longitud_gms       text,
+  geom               text,
+  departamento_id    uuid,
+  municipio_id       uuid,
+  orden              text,
   empresa            text,
   tipo_id            uuid references public.tipos_fito_domi(id),
-  nro_registro       numeric,
+  nro_registro       text,
   actividades        text,
   direccion          text,
-  anio_pago_registro numeric
+  anio_pago_registro text,
+  fotos              jsonb default '[]'::jsonb,
+  audios             jsonb default '[]'::jsonb
 );
 
 create table if not exists public.profiles (

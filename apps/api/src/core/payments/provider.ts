@@ -1,5 +1,6 @@
 export interface CrearPagoInput {
   ordenId: string;
+  /** Importe en CENTAVOS (como las tarifas y las órdenes). */
   monto: number;
   descripcion: string;
   urlRetorno: string;

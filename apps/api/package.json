@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
     "build": "tsc --noEmit",
-    "migrate": "tsx --env-file=../../.env scripts/migrate.ts",
-    "avisos": "tsx --env-file=../../.env scripts/avisos.ts",
-    "clave-botonera": "tsx --env-file=../../.env scripts/clave-botonera.ts"
+    "migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
+    "fitosanitarios:tareas": "tsx --env-file-if-exists=../../.env src/modules/fitosanitarios/tareas.ts",
+    "clave-botonera": "tsx --env-file-if-exists=../../.env scripts/clave-botonera.ts"
   },
   "dependencies": {
     "@botonera/shared": "*",

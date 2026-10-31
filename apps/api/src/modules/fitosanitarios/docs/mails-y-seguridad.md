@@ -20,7 +20,7 @@ y encontrar agujeros, así que además de lo que se hace explica **por qué** y 
 > - `apps/api/src/modules/fitosanitarios/publico.ts`: flujos de la persona (cookie, origen, iniciar, continuar, recuperar, canjear, solicitud).
 > - `apps/api/src/modules/fitosanitarios/panel.ts`: avisos de los técnicos (aprobar, observar, rechazar).
 > - `apps/web/src/modules/fitosanitarios/`: pantallas (`index.tsx` inicio y recuperar, `Solicitud.tsx` solicitud y canje del enlace, `api.ts` cliente).
-> - **Actualización:** además de la sesión por solicitud descripta acá, existe la **sesión de persona** (mail + código) para "Mis certificados" y la cabecera `X-Solicitud`; ver `README-titulares-y-certificados.md`, sección 11. Los pedidos de código tienen el propósito nuevo `fitosanitarios:persona`.
+> - **Actualización:** además de la sesión por solicitud descripta acá, existe la **sesión de persona** (mail + código) para "Mis certificados" y la cabecera `X-Solicitud`; ver `titulares-y-certificados.md`, sección 11. Los pedidos de código tienen el propósito nuevo `fitosanitarios:persona`.
 > - Migración: `db/migrations/0009_enlaces_y_sesiones.sql` (tablas `pagos.fito_enlaces` y `pagos.fito_sesiones`).
 
 ---
@@ -238,6 +238,9 @@ solicitud (no tiene sentido ofrecer "continuar" una ya emitida).
 | 6 | Aprobada | Aprueba un técnico | Enlace de aviso (30 días, una vez) |
 | 7 | Correcciones pedidas | Un técnico observa | Enlace de aviso (30 días, una vez) |
 | 8 | Rechazada | Rechaza un técnico | Sin enlace |
+| 9 | Tu código de verificación (Mis certificados) | Al entrar a "Mis certificados" | Código (15 min) |
+| 10 | Renovación aprobada | Se aprueba sola una renovación sin cambios | Sin enlace (entra con su mail a "Mis certificados") |
+| 11 | Certificado por vencer / vencido | Cron diario (`npm run fitosanitarios:tareas`) | Enlace a "Mis certificados" (sin token); un mail por casilla con todos sus certificados |
 
 Los mails con enlace dicen que es de un solo uso y personal, e incluyen la frase *"Nunca te vamos a
 pedir contraseñas ni datos de tarjeta por mail"*. Los datos cargados por la persona se **escapan**
@@ -443,7 +446,7 @@ Se listan a propósito: son lo que **no** está resuelto o conviene revisar.
 
 ## 13. Despliegue
 
-1. Correr las migraciones pendientes (`npm run migrate`): `0009_enlaces_y_sesiones.sql` (esta) y, a continuación, `0010` y `0011` (titulares y certificados; ver `README-titulares-y-certificados.md`, secciones 9 y 10) **antes** de usar el código nuevo. Crea
+1. Correr las migraciones pendientes (`npm run migrate`): `0009_enlaces_y_sesiones.sql` (esta) y, a continuación, `0010` y `0011` (titulares y certificados; ver `titulares-y-certificados.md`, secciones 9 y 10) **antes** de usar el código nuevo. Crea
    `pagos.fito_enlaces` y `pagos.fito_sesiones` (con RLS), agrega `email_canonico` a
    `pagos.verificaciones_email`, y **borra** las columnas `token_hash` y `token_cifrado` de
    `pagos.fito_solicitudes`.

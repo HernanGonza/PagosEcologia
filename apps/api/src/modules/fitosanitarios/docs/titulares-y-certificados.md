@@ -1,8 +1,8 @@
-# Titulares, certificados y renovaciones (diseño, NO implementado)
+# Titulares, certificados y renovaciones (diseño; construido salvo el pago — ver §7 y §10)
 
 > ## ⚠️ Esto es un diseño para revisar, no código
 > Nada de lo que sigue está construido. Parte de lo que ya existe (solicitudes, enlaces, sesiones; ver
-> [`README-mails-y-seguridad.md`](README-mails-y-seguridad.md)) y propone cómo agregar **registro de
+> [`mails-y-seguridad.md`](mails-y-seguridad.md)) y propone cómo agregar **registro de
 > titulares, certificados con vencimiento, historial y renovaciones**.
 >
 > **El pago y la emisión del certificado tampoco están implementados** y este diseño depende de ellos:
@@ -114,7 +114,7 @@ Lo que se emite al terminar una solicitud (`emitida`). **Se emite uno por objeto
 **Historial (`fito_certificados`, una fila por certificado, no se pisa):**
 - `registro_id` (el objeto en `fitosanitarios_domisanitarios`), `titular_id`, `tipo`, `numero` (propio, legible, único).
 - `solicitud_id` y `orden_id` (referencias simples, sin clave foránea entre esquemas).
-- **`vigente_desde`** y **`vence_en`** = `vigente_desde` + **12 meses**, calculados en el servidor con fecha de Argentina (ver 4.4). `emitido_en` es la fecha de emisión, que puede ser anterior a `vigente_desde`.
+- **`vigente_desde`** y **`vence_en`** = `vigente_desde` + **12 meses − 1 día** (del 1/1/2026 al 31/12/2026; el estado es `vigente` mientras `hoy <= vence_en`), calculados en el servidor con fecha de Argentina (ver 4.4). `emitido_en` es la fecha de emisión, que puede ser anterior a `vigente_desde`.
 - `renovado_de` (el certificado anterior de la misma cadena, o null): la cadena es el **historial** de un objeto, sin depender de comparar textos como "dominio". Un certificado solo puede ser renovado **una vez** (`renovado_de` único).
 - `revocado_en` / motivo (para anular un certificado emitido por error o por infracción; nunca se borra).
 - `codigo_verificacion`: código **al azar e impredecible** (128 bits) que va en el **QR** (ver 4.6). No es el `numero`: el número es legible y correlativo y no debe servir para adivinar otros certificados.
@@ -148,7 +148,7 @@ Hoy `fito_documentos` no guarda cuándo vence un documento. Se agrega `vence_en`
 3. **Toda solicitud nueva pasa por revisión técnica.** Al aprobarla, el técnico además **aprueba el vínculo** de ese mail con el DNI/CUIT:
    - Si el titular **no existía**, se crea y el mail queda vinculado.
    - Si **ya existía** (otro mail ya está vinculado), la solicitud se revisa igual, con su poder firmado, y al aprobarla el mail queda vinculado. Mientras tanto no ve nada del titular.
-4. **Pago** → emisión: crea el **certificado** (`vence_en` = emisión + 12 meses).
+4. **Pago** → emisión: crea el **certificado** (`vence_en` = emisión + 12 meses − 1 día).
 
 Todo el flujo actual de solicitudes (enlaces, sesión, avisos) sigue igual; lo nuevo es que **la solicitud cuelga de un titular** (por su DNI/CUIT normalizado) y **al emitirse crea un certificado**.
 
@@ -184,13 +184,13 @@ Después de verificar el mail, la persona ve **los titulares de los que es repre
 6. **"Renovación automática"** se entiende como: aviso previo + solicitudes ya armadas + salteo de la revisión cuando corresponde. **No** como cobro ni emisión sin que la persona confirme y pague.
 
 **Desde cuándo vale el certificado nuevo (decisiones tomadas):**
-- **Renovación anticipada** (el anterior sigue vigente): el nuevo vale **desde el vencimiento del anterior**, **sin importar cuándo se pagó**. `vigente_desde` = día siguiente a `vence_en` del anterior y `vence_en` = `vigente_desde` + 12 meses. Pagar antes no acorta ni alarga nada.
+- **Renovación anticipada** (el anterior sigue vigente): el nuevo vale **desde el vencimiento del anterior**, **sin importar cuándo se pagó**. `vigente_desde` = día siguiente a `vence_en` del anterior y `vence_en` = `vigente_desde` + 12 meses − 1 día. Pagar antes no acorta ni alarga nada.
 - **Renovación tardía** (el anterior venció hace 30 días o menos): el nuevo vale **desde la emisión**, **sin cobertura retroactiva**. `vigente_desde` = fecha de emisión (en Argentina). Entre el vencimiento del anterior y esa fecha el objeto queda sin certificado vigente.
 - **Anticipación máxima: 30 días.** Solo se puede iniciar la renovación de un certificado vigente cuando faltan **30 días o menos** para su vencimiento; así no se apilan renovaciones de años. Un certificado ya vencido se puede renovar **hasta 30 días después de su vencimiento**; pasado ese plazo **no se renueva: se empieza de nuevo** con un alta completa (todos los requisitos y documentos, como la primera vez), que genera un certificado nuevo sin `renovado_de`. Los avisos de vencimiento se ajustan a esa ventana (ver 4.5).
 
 ### 4.5 Avisos de vencimiento
 
-Un **proceso programado** (cron/worker, el que ya estaba pendiente) busca certificados que vencen en 30 y 7 días (la renovación solo se habilita a 30 días del vencimiento; 4.4; los valores exactos se pueden ajustar) y también los ya vencidos y manda un mail con el enlace para renovar **al mail de la solicitud que originó el último certificado** de esa cadena (decidido). Si ese mail fue dado de baja del titular, el aviso va a los mails vinculados que sigan activos. Se registra qué aviso se mandó para no repetirlo. El mismo proceso:
+Un **proceso programado** (cron/worker, el que ya estaba pendiente) busca certificados que vencen en 30 y 7 días (la renovación solo se habilita a 30 días del vencimiento; 4.4; los valores exactos se pueden ajustar) y también los ya vencidos y manda un mail con el enlace para renovar **al mail de la solicitud que originó el último certificado** de esa cadena (decidido). Si ese mail fue dado de baja del titular, el aviso va a los mails vinculados que sigan activos (**implementado así**; el asunto dice "vencido" si ya venció). Se registra qué aviso se mandó para no repetirlo. El mismo proceso:
 
 - avisa si un documento está por vencer o venció;
 - marca las aprobaciones sin pago como `vencida` (pendiente desde antes) y reintenta los mails fallidos.
@@ -201,7 +201,7 @@ Los certificados vencidos no se "actualizan" para que el estado sea correcto (ya
 
 ### 4.6 QR de verificación pública (decidido: sí)
 
-Cada certificado emitido lleva impreso un **código QR**. Al escanearlo se abre una página pública (`/verificar/<codigo_verificacion>`) que dice si el certificado es **auténtico y qué estado tiene hoy**. Sirve para que un inspector, una municipalidad o un tercero verifique en el momento que un papel no es falso o está vencido.
+Cada certificado emitido lleva impreso un **código QR**. Al escanearlo se abre una página pública (`/pagar/fitosanitarios/verificar/<codigo_verificacion>`) que dice si el certificado es **auténtico y qué estado tiene hoy**. Sirve para que un inspector, una municipalidad o un tercero verifique en el momento que un papel no es falso o está vencido.
 
 - **Qué muestra** (confirmado): número de certificado, tipo, objeto (para un vehículo, la **patente**, y además el **vencimiento de la VTV**), fechas de vigencia y **estado calculado hoy** (*vigente*, *por comenzar*, *vencido*, *revocado*), y el **nombre o razón social del titular** (coherente con los "datos mínimos" que ya usa el sistema para que alguien confirme que es el titular correcto). **No** muestra DNI/CUIT, domicilio, teléfono, mails ni documentos.
 - **Seguridad:** el QR lleva el `codigo_verificacion` (impredecible), no el número correlativo; no hay listado ni búsqueda en esa página; un código inexistente da siempre la misma respuesta genérica; tope de pedidos por IP; sin cookies ni sesión; `Cache-Control: no-store` para que un certificado revocado o vencido no se siga mostrando como vigente.
@@ -257,7 +257,7 @@ Como se arranca de cero y a todos se les pide todo, **no hay importación** ni s
 
 | Fase | Contenido | Depende de |
 |---|---|---|
-| 0 | Correr las migraciones pendientes (`0009`, `0010`, `0011`; ver **9. Migraciones listas para correr**) y las verificaciones de producción de `README-mails-y-seguridad.md` | — |
+| 0 | Correr las migraciones pendientes (`0009`, `0010`, `0011`; ver **9. Migraciones listas para correr**) y las verificaciones de producción de `mails-y-seguridad.md` | — |
 | 0.5 | **SQL de Ecodatos — hecho: `0010_ecodatos_registro.sql`** (titulares, vínculos, registro reconfigurado, historial de certificados, estado y permisos del rol `botonera`). | — |
 | 1 | **Titulares y vínculos**: unicidad y validación de DNI/CUIT, vínculo mail ↔ titular al aprobar, bajas; las solicitudes cuelgan de un titular; búsqueda en el panel con registro de consultas | formularios (provisorios sirven para empezar) |
 | 2 | **Sesión de persona y tablero** (6.1) | Fase 1 |
@@ -316,14 +316,14 @@ Se aplican en orden con `npm run migrate` (rol `postgres`). Las tres corrieron c
 
 | Archivo | Dónde | Qué hace |
 |---|---|---|
-| `0009_enlaces_y_sesiones.sql` | `pagos` | Enlaces de un solo uso y sesiones con cookie; email canónico; borra `token_hash` y `token_cifrado` (**los enlaces viejos dejan de servir**). Ver `README-mails-y-seguridad.md`. |
+| `0009_enlaces_y_sesiones.sql` | `pagos` | Enlaces de un solo uso y sesiones con cookie; email canónico; borra `token_hash` y `token_cifrado` (**los enlaces viejos dejan de servir**). Ver `mails-y-seguridad.md`. |
 | `0010_ecodatos_registro.sql` | **Ecodatos (`public`)** | `fito_titulares`, `fito_vinculos`, `fito_certificados` (historial); reconfigura `fitosanitarios_domisanitarios` (quita `anio_pago_registro`; agrega `titular_id`, `objeto_etiqueta`, `datos`, `fecha_registro`, `vence_en`, `vtv_vence_en`, `revocado_*`); funciones y vistas de estado; permisos mínimos. |
 | `0011_titulares_y_renovaciones.sql` | `pagos` | Solicitudes de alta/renovación y sus referencias; vencimiento y arrastre de documentos; sesión y enlace por persona; registro de consultas al padrón; avisos de vencimiento; config (renovación, VTV, poder); **tasas mock**; elimina restos del primer diseño. |
 
 **Antes de correr en el servidor**
 
 1. Hacer copia de la base (o un punto de restauración).
-2. `0010` se **detiene sin cambiar nada** si `fitosanitarios_domisanitarios` tiene filas con `anio_pago_registro`. Revisar con: `select count(*) from public.fitosanitarios_domisanitarios;` (debería dar 0).
+2. `0010` se **detiene sin cambiar nada** en dos casos: (a) si `fitosanitarios_domisanitarios` tiene filas con `anio_pago_registro` (el dump de prueba `fitosanitarios_domisanitarios_rows.json` tiene **una**: "Soluciones Integrales", nro 1, año 2026; hay que decidir si se borra o se migra **antes** de correr); (b) si la tabla real tiene alguna columna obligatoria y sin valor por defecto además de las que la botonera completa (ej. `user_id` o `formulario_id`): el alta al emitir fallaría. Revisar con: `select count(*) from public.fitosanitarios_domisanitarios;` y `select column_name from information_schema.columns where table_name='fitosanitarios_domisanitarios' and is_nullable='NO' and column_default is null;`. Si quedaran filas numeradas, la secuencia `fito_registro_nro_seq` arranca después del mayor `nro_registro`. Ojo: si Ecodatos lista los registros filtrando por `formulario_id`, los objetos que crea la botonera no aparecerán en su plataforma mientras no se les complete (decide quien mantiene Ecodatos).
 3. Cada migración corre en su propia transacción: si falla, esa no queda a medias.
 4. Mirar si alguna pantalla o consulta de Ecodatos usa `anio_pago_registro` (se elimina) o `empresa` (deja de ser obligatoria, pero la columna **se mantiene**, igual que `direccion`, `orden` y `actividades`, para no romper nada mientras se adapta el código).
 5. `0010` quita a `anon` y `authenticated` todo permiso sobre las tablas nuevas (son datos personales). Al final del archivo hay un bloque **comentado** para dar lectura al personal de Ecodatos si lo quieren.
@@ -366,13 +366,13 @@ Todo lo de abajo **se probó de punta a punta** contra la base local (alta de un
 | Vigencia de la renovación | `emitirCertificado` | ✔ Anticipada: desde el día siguiente al vencimiento anterior. Tardía: desde hoy. |
 | Panel: primera vez / renovaciones | `Lista.tsx` | ✔ Dos listas con filtros y conteos propios. |
 | Panel: búsqueda y ficha | `Titulares.tsx`, `FichaTitular.tsx` | ✔ Por DNI, CUIT, nombre, certificado o patente; cada consulta queda en `pagos.fito_consultas_padron`. Revocar certificados y resolver bajas. |
-| Avisos de vencimiento | `avisos.ts`, `npm run avisos` | ✔ 30 y 7 días antes y al vencer, un mail por casilla, sin repetir; reintenta los que fallaron. **Hay que programarlo en el cron del servidor** (una vez por día). |
+| Avisos de vencimiento | `avisos.ts`, `npm run fitosanitarios:tareas` | ✔ 30 y 7 días antes y al vencer, un mail por casilla, sin repetir; reintenta los que fallaron. **Hay que programarlo en el cron del servidor** (una vez por día). |
 | Tasas editables | `POST /api/admin/tarifas`, `Tramites.tsx` | ✔ "Cambiar valor" en el panel financiero: agrega una versión con fecha de vigencia y queda auditada. Como todo `/api/admin`, no responde hasta que el panel tenga login (hoy `ADMIN_SIN_LOGIN=true` solo en local). |
 
 ### Para dejar andando el lunes
 
 1. Correr las migraciones (sección 9).
-2. En el servidor: programar `npm run avisos` una vez por día.
+2. En el servidor: programar `npm run fitosanitarios:tareas` una vez por día.
 3. Definir `VERIFICACION_SECRETO`, `TRUST_PROXY` y `WEB_URL` (la dirección pública: el QR del PDF y los mails la usan). **No** definir `EMISION_SIMULADA`.
 4. Verificar en Ecodatos que el catálogo `tipos_fito_domi` tenga un tipo cuyo nombre empiece con *comercio*, *vehículo*, *depósito* y *fraccionamiento* (sin importar acentos): al emitir se busca así. Si falta, la emisión responde con un error claro y no emite.
 
@@ -390,7 +390,7 @@ Todo lo de abajo **se probó de punta a punta** contra la base local (alta de un
 
 ## 11. Detalles técnicos y límites conocidos de lo construido
 
-**Cómo se accede (cambia respecto de `README-mails-y-seguridad.md`)**
+**Cómo se accede (cambia respecto de `mails-y-seguridad.md`)**
 - Hay dos tipos de sesión, con **la misma cookie** (`HttpOnly`, `SameSite=Strict`, igual vencimiento): la de **solicitud** (viene de un enlace del mail) y la de **persona** (mail + código, para "Mis certificados"; el código se pide con `POST /codigo` y `para: 'persona'`). Abrir una reemplaza a la otra, y una sesión de persona nueva cierra las anteriores de esa casilla.
 - Una sesión de persona abre solicitudes mandando el número en la cabecera `X-Solicitud`; la API solo la acepta si la solicitud es **de esa misma casilla**. Sin la cabecera, una sesión de persona no abre ninguna solicitud.
 - Cualquiera de las dos sesiones prueba que la persona controla la casilla, así que ambas dan acceso a "Mis certificados" (solo los titulares a los que el mail está **vinculado**). La búsqueda por DNI/CUIT no es pública.
@@ -404,7 +404,7 @@ Todo lo de abajo **se probó de punta a punta** contra la base local (alta de un
 **Reglas que conviene tener presentes**
 - El certificado "actual" de un objeto es el **último de su cadena de renovaciones**; si ese fue revocado, el objeto no se puede renovar (hay que iniciar una solicitud nueva).
 - Si pasó la ventana (30 días) y la persona empieza de nuevo con el mismo objeto del mismo titular (misma patente o dirección), **se reutiliza el objeto registrado**: el historial sigue siendo uno. Si la misma patente la registra **otro titular**, queda como otro objeto (puede haber dos con la misma patente; el panel los muestra bajo cada titular).
-- `vence_en` del registro lo pisa un trigger al emitir; el rol `botonera` no puede escribirlo a mano. La vista `public.fito_control_vigencia` debe dar 0 filas.
+- `vence_en` del registro lo recalcula un trigger al emitir **y al revocar** (queda el mayor entre los certificados no revocados, o null);  el rol `botonera` no puede escribirlo a mano. La vista `public.fito_control_vigencia` debe dar 0 filas.
 - Un certificado emitido no se modifica ni se borra: solo se marca la revocación.
 - El estado de aprobación sin pago vencida se calcula al leer; el cron diario además la deja en el historial.
 

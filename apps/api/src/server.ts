@@ -7,6 +7,7 @@ import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
 import { descargarArchivo, storageLocalDir } from './core/storage.js';
 import { exigirCorreoReal } from './core/correo.js';
 import { exigirSecretoDeCodigos } from './core/verificacion.js';
+import { exigirMigraciones } from './core/migraciones.js';
 
 // En producción no se arranca con la configuración de desarrollo.
 exigirCorreoReal();
@@ -16,12 +17,22 @@ if (process.env.NODE_ENV === 'production' && !process.env.TRUST_PROXY?.trim()) {
   throw new Error('Falta TRUST_PROXY en el .env (cantidad de proxies delante de la API, ej. 1). Sin eso los topes por IP se pueden falsear.');
 }
 
+// Guardas de producción: nada de configuración de desarrollo.
+if (process.env.NODE_ENV === 'production') {
+  if (process.env.ADMIN_SIN_LOGIN === 'true') throw new Error('ADMIN_SIN_LOGIN=true no puede usarse en producción: el panel financiero quedaría abierto.');
+  if (process.env.PAYMENT_PROVIDER !== 'macroclick') throw new Error('En producción PAYMENT_PROVIDER debe ser macroclick: el proveedor mock acepta cualquier webhook.');
+  if (!(process.env.CORS_ORIGINS ?? process.env.WEB_URL)?.trim()) throw new Error('Falta WEB_URL (o CORS_ORIGINS) en el .env: orígenes permitidos para la API.');
+}
+await exigirMigraciones();
+
 const app = express();
 // Detrás del proxy (nginx/caddy) la IP real llega en X-Forwarded-For; se usa para los topes anti-abuso.
 // TRUST_PROXY=<cantidad de proxies> (ej. 1 si hay uno solo, como HAProxy) es lo más estricto; por defecto (solo desarrollo) confía en proxies de red privada.
 const proxy = process.env.TRUST_PROXY?.trim();
 app.set('trust proxy', proxy ? (/^\d+$/.test(proxy) ? Number(proxy) : proxy) : 'loopback, linklocal, uniquelocal');
-app.use(cors());
+// En producción solo los orígenes declarados; en desarrollo (Vite con proxy) no hace falta restringir.
+const origenes = (process.env.CORS_ORIGINS ?? process.env.WEB_URL ?? '').split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+app.use(cors(process.env.NODE_ENV === 'production' ? { origin: origenes } : undefined));
 app.use(express.json({ limit: '200kb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
