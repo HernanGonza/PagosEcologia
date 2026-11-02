@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 import type { ObjetoVista, TitularFicha } from '@botonera/shared';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { avisoError, avisoExito, pedirTexto } from '@/lib/alertas';
 import { cn } from '@/lib/utils';
-import { api, useYo } from '../../sesion';
+import { VolverAtras } from '@/lib/volver';
+import { abrirPdf, api, useYo } from '../../sesion';
 import { RUTA, fecha, fechaHora } from './comunes';
 
 const tono: Record<ObjetoVista['estado'], string> = {
@@ -55,9 +56,7 @@ export default function FichaTitular() {
 
   const Volver = ({ children }: { children: React.ReactNode }) => (
     <div>
-      <Link to=".." relative="path" className="mb-4 inline-flex items-center gap-1.5 text-sm text-verde-700 hover:underline">
-        <ArrowLeft className="size-4" /> Titulares
-      </Link>
+      <VolverAtras etiqueta="Titulares" relative="path" className="mb-4 inline-flex items-center gap-1.5 text-sm text-verde-700 hover:underline" />
       {children}
     </div>
   );
@@ -101,7 +100,7 @@ export default function FichaTitular() {
                       {{ vigente: 'vigente', por_comenzar: 'por comenzar', vencido: 'vencido', revocado: 'revocado' }[c.estado]}
                     </span>
                     {c.revocadoMotivo && <span className="text-xs text-muted-foreground">({c.revocadoMotivo})</span>}
-                    <Button asChild variant="ghost" size="sm"><a href={`/api${RUTA}/certificados/${c.id}/pdf`} target="_blank" rel="noreferrer"><Download /> PDF</a></Button>
+                    <Button variant="ghost" size="sm" onClick={() => abrirPdf(`${RUTA}/certificados/${c.id}/pdf`).catch((e) => avisoError('No se pudo abrir el certificado', (e as Error).message))}><Download /> PDF</Button>
                     {puedeEditar && c.estado !== 'revocado' && (
                       <Button variant="ghost" size="sm" className="text-destructive" onClick={() => revocar(c.id, c.numero)}>Revocar</Button>
                     )}

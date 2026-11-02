@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EstadoOrden } from '@botonera/shared';
+import { fetchAutenticado } from './sesion';
 
 /** GET a la API del panel (/api/admin/...). Vite la proxea a la API en desarrollo. */
 export function useApi<T>(ruta: string) {
@@ -11,7 +12,7 @@ export function useApi<T>(ruta: string) {
     const control = new AbortController();
     setCargando(true);
     setError(null);
-    fetch(`/api/admin${ruta}`, { signal: control.signal })
+    fetchAutenticado(`/api/admin${ruta}`, { signal: control.signal })
       .then(async (res) => {
         const cuerpo = await res.json().catch(() => null);
         if (!res.ok) throw new Error(cuerpo?.error ?? `Error ${res.status}`);

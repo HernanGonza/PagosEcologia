@@ -31,7 +31,7 @@ import {
   solicitudPublica,
   type FilaSolicitud,
 } from './solicitudes.js';
-import { aprobarTitularYVinculo, buscarTitulares, fichaTitular } from './titulares.js';
+import { aprobarTitularYVinculo, buscarTitulares, certificadoPorId, fichaTitular } from './titulares.js';
 import { pdfDeCertificado } from './certificados.js';
 
 export const panelRouter = Router();
@@ -79,8 +79,9 @@ panelRouter.get('/solicitudes', lectura, async (req, res, next) => {
       valores.push(valor);
       condiciones.push(sql.replace('?', `$${valores.length}`));
     };
-    const estado = String(req.query.estado ?? '');
-    if (estadosSolicitud.includes(estado as EstadoSolicitud)) agregar(`${sqlEstadoEfectivo('s.')} = ?`, estado);
+    // Uno o varios estados separados por coma (ej. `pagada,emitida` para la pestaña de finalizadas).
+    const estados = String(req.query.estado ?? '').split(',').filter((e) => estadosSolicitud.includes(e as EstadoSolicitud));
+    if (estados.length) agregar(`${sqlEstadoEfectivo('s.')} = any(?::text[])`, estados);
     if (req.query.tipo) agregar('s.tipo = ?', String(req.query.tipo));
     // Primera vez (altas) o renovaciones: son dos listas del panel.
     if (req.query.clase === 'alta' || req.query.clase === 'renovacion') agregar('s.tipo_solicitud = ?', String(req.query.clase));
@@ -96,7 +97,7 @@ panelRouter.get('/solicitudes', lectura, async (req, res, next) => {
 
     const config = await configModulo();
     const nombres = new Map(config.solicitud.tipos.map((t) => [t.slug, t.nombre]));
-    const [filas, total, conteo] = await Promise.all([
+    const [filas, total, conteo, nuevas] = await Promise.all([
       pool.query<{
         id: string; numero: string; tipo: string; estado: EstadoSolicitud; email: string; titular: string | null;
         identificador: string | null; enviada_en: Date | null; updated_at: Date; revisor_nombre: string | null; tomada_en: Date | null; abiertas: number;
@@ -116,11 +117,19 @@ panelRouter.get('/solicitudes', lectura, async (req, res, next) => {
           where estado <> 'borrador' ${req.query.clase === 'alta' || req.query.clase === 'renovacion' ? 'and tipo_solicitud = $1' : ''} group by 1`,
         req.query.clase === 'alta' || req.query.clase === 'renovacion' ? [String(req.query.clase)] : [],
       ),
+      // Pendientes de cada lista, sin importar el filtro actual: así el badge de la pestaña avisa dónde hay algo nuevo.
+      pool.query<{ clase: 'alta' | 'renovacion'; n: number }>(
+        `select tipo_solicitud as clase, count(*)::int as n from pagos.fito_solicitudes where estado = 'enviada' group by 1`,
+      ),
     ]);
 
     const body: SolicitudesPanelResponse = {
       total: total.rows[0].n,
       porEstado: Object.fromEntries(conteo.rows.map((r) => [r.estado, r.n])),
+      pendientesPorClase: {
+        alta: nuevas.rows.find((r) => r.clase === 'alta')?.n ?? 0,
+        renovacion: nuevas.rows.find((r) => r.clase === 'renovacion')?.n ?? 0,
+      },
       filas: filas.rows.map(
         (f): SolicitudResumenPanel => ({
           id: f.id,
@@ -172,6 +181,7 @@ panelRouter.get('/solicitudes/:id', lectura, async (req, res, next) => {
       documentos: await Promise.all(
         docs.map(async (d) => ({ ...documentoPublico(d), reemplazado: !!d.reemplazado_en, url: await enlaceFirmado(BUCKET, d.ruta, 600) })),
       ),
+      certificado: s.certificado_id ? await certificadoPorId(s.certificado_id) : null,
       acciones: puedeEditar ? accionesPorEstado[s.estado] ?? [] : [],
     };
     res.json(body);

@@ -1,0 +1,429 @@
+/**
+ * Panel de consultores: los técnicos con el formulario de consultores en Ecodatos revisan
+ * las solicitudes y las aprueban, observan o rechazan. Cada acción avisa por mail a la persona
+ * y queda en el historial de la solicitud y en `pagos.auditoria`.
+ */
+import { Router, type Request } from 'express';
+import type { PoolClient } from 'pg';
+import { pool } from '../../db.js';
+import { requierePanel } from '../../core/auth-ecodatos.js';
+import { enlaceFirmado } from '../../core/storage.js';
+import {
+  BUCKET,
+  ErrorSolicitud,
+  MODULO,
+  avisar,
+  bloquear,
+  cambiarEstado,
+  configModulo,
+  documentoPublico,
+  documentos,
+  enTransaccion,
+  avisarConEnlace,
+  textoDuracion,
+  SQL_HOY,
+  sqlEstadoEfectivo,
+  ENLACE_AVISO,
+  historial,
+  solicitudPorId,
+  solicitudPublica,
+  type FilaSolicitud,
+} from './solicitudes.js';
+import { aprobarTitularYVinculo, buscarTitulares, certificadoPorId, fichaTitular } from './titulares.js';
+import { pdfDeCertificado } from './certificados.js';
+import { consultores as c } from '@botonera/shared';
+const { estadosSolicitud } = c;
+type EstadoSolicitud = c.EstadoSolicitud;
+type SolicitudesPanelResponse = c.SolicitudesPanelResponse;
+type SolicitudPanel = c.SolicitudPanel;
+type SolicitudResumenPanel = c.SolicitudResumenPanel;
+
+export const panelRouter = Router();
+
+const lectura = requierePanel(MODULO);
+const edicion = requierePanel(MODULO, { edicion: true });
+
+/** Quién hace la acción: queda en el historial, en las observaciones y en la auditoría. */
+const quien = (req: Request) => {
+  const u = req.sesionPanel!.usuario;
+  return { id: u.id, nombre: u.nombre ?? u.email, email: u.email, ip: req.ip ?? null };
+};
+type Tecnico = ReturnType<typeof quien>;
+
+const tomadaPor = (yo: Tecnico) => ({ revisor_id: yo.id, revisor_nombre: yo.nombre, revisor_email: yo.email, tomada_en: new Date() });
+/** Aprobar, observar o rechazar sin haberla tomado antes también la toma; si ya la tenía otro, no se pisa. */
+const tomarSiFalta = (s: FilaSolicitud, yo: Tecnico) => (s.revisor_id ? {} : tomadaPor(yo));
+const resueltaPor = (yo: Tecnico) => ({ resuelta_en: new Date(), resuelta_por_id: yo.id, resuelta_por_nombre: yo.nombre, resuelta_por_email: yo.email });
+
+/** Qué acciones admite cada estado. */
+const accionesPorEstado: Partial<Record<EstadoSolicitud, SolicitudPanel['acciones']>> = {
+  enviada: ['tomar', 'aprobar', 'observar', 'rechazar'],
+  en_revision: ['aprobar', 'observar', 'rechazar'],
+};
+
+function exigirAccion(s: FilaSolicitud, accion: SolicitudPanel['acciones'][number]) {
+  if (!accionesPorEstado[s.estado]?.includes(accion)) {
+    throw new ErrorSolicitud(409, 'La solicitud cambió de estado mientras la mirabas. Actualizá la página.');
+  }
+}
+
+async function auditar(client: PoolClient, req: Request, accion: string, s: FilaSolicitud, despues: unknown) {
+  await client.query(
+    `insert into pagos.auditoria (actor, accion, entidad, entidad_id, antes, despues)
+     values ($1, $2, 'cons_solicitud', $3, $4, $5)`,
+    [`ecodatos:${req.sesionPanel!.usuario.email}`, accion, s.id, { estado: s.estado }, { ...(despues as object), ip: req.ip ?? null }],
+  );
+}
+
+panelRouter.get('/solicitudes', lectura, async (req, res, next) => {
+  try {
+    const condiciones = ["s.estado <> 'borrador'"]; // los borradores son de la persona, no del área
+    const valores: unknown[] = [];
+    const agregar = (sql: string, valor: unknown) => {
+      valores.push(valor);
+      condiciones.push(sql.replace('?', `$${valores.length}`));
+    };
+    // Uno o varios estados separados por coma (ej. `pagada,emitida` para la pestaña de finalizadas).
+    const estados = String(req.query.estado ?? '').split(',').filter((e) => estadosSolicitud.includes(e as EstadoSolicitud));
+    if (estados.length) agregar(`${sqlEstadoEfectivo('s.')} = any(?::text[])`, estados);
+    if (req.query.tipo) agregar('s.tipo = ?', String(req.query.tipo));
+    // Primera vez (altas) o renovaciones: son dos listas del panel.
+    if (req.query.clase === 'alta' || req.query.clase === 'renovacion') agregar('s.tipo_solicitud = ?', String(req.query.clase));
+    const q = String(req.query.q ?? '').trim();
+    if (q) {
+      valores.push(`%${q.toLowerCase()}%`);
+      const p = `$${valores.length}`;
+      condiciones.push(`(lower(s.numero) like ${p} or lower(s.email) like ${p} or lower(s.datos->>'titular') like ${p} or s.datos->>'identificador' like ${p})`);
+    }
+    const limite = Math.min(Number(req.query.limite) || 50, 200);
+    const desde = Math.max(Number(req.query.desde_fila) || 0, 0);
+    const where = condiciones.join(' and ');
+
+    const config = await configModulo();
+    const nombres = new Map(config.solicitud.tipos.map((t) => [t.slug, t.nombre]));
+    const [filas, total, conteo, nuevas] = await Promise.all([
+      pool.query<{
+        id: string; numero: string; tipo: string; estado: EstadoSolicitud; email: string; titular: string | null;
+        identificador: string | null; enviada_en: Date | null; updated_at: Date; revisor_nombre: string | null; tomada_en: Date | null; abiertas: number;
+        tipo_solicitud: 'alta' | 'renovacion'; titular_id: string | null;
+      }>(
+        `select s.id, s.numero, s.tipo, ${sqlEstadoEfectivo('s.')} as estado, s.email, s.datos->>'titular' as titular, s.datos->>'identificador' as identificador,
+                s.enviada_en, s.updated_at, s.revisor_nombre, s.tomada_en, s.tipo_solicitud, s.titular_id,
+                (select count(*)::int from pagos.cons_observaciones o where o.solicitud_id = s.id and o.resuelta_en is null) as abiertas
+           from pagos.cons_solicitudes s where ${where}
+          order by case s.estado when 'enviada' then 0 when 'en_revision' then 1 else 2 end, s.enviada_en nulls last, s.updated_at desc
+          limit ${limite} offset ${desde}`,
+        valores,
+      ),
+      pool.query<{ n: number }>(`select count(*)::int as n from pagos.cons_solicitudes s where ${where}`, valores),
+      pool.query<{ estado: EstadoSolicitud; n: number }>(
+        `select ${sqlEstadoEfectivo()} as estado, count(*)::int as n from pagos.cons_solicitudes
+          where estado <> 'borrador' ${req.query.clase === 'alta' || req.query.clase === 'renovacion' ? 'and tipo_solicitud = $1' : ''} group by 1`,
+        req.query.clase === 'alta' || req.query.clase === 'renovacion' ? [String(req.query.clase)] : [],
+      ),
+      // Pendientes de cada lista, sin importar el filtro actual: así el badge de la pestaña avisa dónde hay algo nuevo.
+      pool.query<{ clase: 'alta' | 'renovacion'; n: number }>(
+        `select tipo_solicitud as clase, count(*)::int as n from pagos.cons_solicitudes where estado = 'enviada' group by 1`,
+      ),
+    ]);
+
+    const body: SolicitudesPanelResponse = {
+      total: total.rows[0].n,
+      porEstado: Object.fromEntries(conteo.rows.map((r) => [r.estado, r.n])),
+      pendientesPorClase: {
+        alta: nuevas.rows.find((r) => r.clase === 'alta')?.n ?? 0,
+        renovacion: nuevas.rows.find((r) => r.clase === 'renovacion')?.n ?? 0,
+      },
+      filas: filas.rows.map(
+        (f): SolicitudResumenPanel => ({
+          id: f.id,
+          numero: f.numero,
+          tipo: f.tipo,
+          tipoNombre: nombres.get(f.tipo) ?? f.tipo,
+          estado: f.estado,
+          titular: f.titular,
+          identificador: f.identificador,
+          email: f.email,
+          enviadaEn: f.enviada_en?.toISOString() ?? null,
+          actualizadaEn: f.updated_at.toISOString(),
+          revisorNombre: f.revisor_nombre,
+          tomadaEn: f.tomada_en?.toISOString() ?? null,
+          observacionesAbiertas: f.abiertas,
+          tipoSolicitud: f.tipo_solicitud,
+          titularId: f.titular_id,
+        }),
+      ),
+    };
+    res.json(body);
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.get('/solicitudes/:id', lectura, async (req, res, next) => {
+  try {
+    const s = await solicitudPorId(String(req.params.id));
+    if (!s || s.estado === 'borrador') throw new ErrorSolicitud(404, 'La solicitud no existe.');
+    const [base, docs, hist] = await Promise.all([
+      solicitudPublica(s),
+      documentos(s.id, { incluirReemplazados: true }),
+      historial(s.id, { conEmail: true }),
+    ]);
+    const puedeEditar = req.sesionPanel!.modulos.find((m) => m.slug === MODULO)?.puedeEditar ?? false;
+    const { puedeEditar: _p, documentos: _d, ...resto } = base;
+    const body: SolicitudPanel = {
+      ...resto,
+      historial: hist,
+      id: s.id,
+      titularId: s.titular_id,
+      revisorNombre: s.revisor_nombre,
+      tomada: s.tomada_en ? { nombre: s.revisor_nombre, email: s.revisor_email, fecha: s.tomada_en.toISOString() } : null,
+      resuelta:
+        s.resuelta_en && s.resuelta_por_id
+          ? { nombre: s.resuelta_por_nombre, email: s.resuelta_por_email, fecha: s.resuelta_en.toISOString() }
+          : null,
+      documentos: await Promise.all(
+        docs.map(async (d) => ({ ...documentoPublico(d), reemplazado: !!d.reemplazado_en, url: await enlaceFirmado(BUCKET, d.ruta, 600) })),
+      ),
+      certificado: s.certificado_id ? await certificadoPorId(s.certificado_id) : null,
+      acciones: puedeEditar ? accionesPorEstado[s.estado] ?? [] : [],
+    };
+    res.json(body);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Tomar la revisión: avisa a los demás técnicos que alguien ya la está mirando. */
+panelRouter.post('/solicitudes/:id/tomar', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    await enTransaccion(async (client) => {
+      const s = await bloquear(client, String(req.params.id));
+      exigirAccion(s, 'tomar');
+      await cambiarEstado(client, s, 'en_revision', { actor: 'tecnico', ...yo }, tomadaPor(yo));
+      await auditar(client, req, 'tomar', s, { estado: 'en_revision' });
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.post('/solicitudes/:id/aprobar', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    const nota = String(req.body?.nota ?? '').trim().slice(0, 2000) || null;
+    const { aprobacionDias = 30 } = (await configModulo()).solicitud;
+    // El plazo de pago se cuenta en días de Argentina (no de UTC).
+    const { rows: plazo } = await pool.query<{ d: string }>(`select (${SQL_HOY} + $1::int)::text as d`, [aprobacionDias]);
+    const s = await enTransaccion(async (client) => {
+      const s = await bloquear(client, String(req.params.id));
+      exigirAccion(s, 'aprobar');
+      // La aprobación es la prueba de identidad: crea (o reconoce) al titular y vincula el mail.
+      const { titularId } = await aprobarTitularYVinculo(client, s, { id: yo.id, nombre: yo.nombre });
+      await cambiarEstado(
+        client, s, 'aprobada', { actor: 'tecnico', ...yo, nota },
+        {
+          ...tomarSiFalta(s, yo),
+          ...resueltaPor(yo),
+          aprobacion_vence: plazo[0].d,
+        },
+      );
+      await auditar(client, req, 'aprobar', s, { estado: 'aprobada', nota, titularId });
+      return s;
+    });
+    await avisarConEnlace(s.id, ENLACE_AVISO, (url) => ({
+      para: s.email,
+      asunto: `Solicitud ${s.numero}: aprobada`,
+      titulo: '¡Tu solicitud fue aprobada!',
+      parrafos: [
+        `Los técnicos revisaron la solicitud ${s.numero} y está todo en orden.`,
+        ...(nota ? [`Nota del área: ${nota}`] : []),
+        `Ya podés continuar con el pago de la tasa. Tenés ${aprobacionDias} días; después de ese plazo la aprobación vence.`,
+        `El enlace es de un solo uso, personal, y se puede abrir durante ${textoDuracion(ENLACE_AVISO.ventanaMin)}. Si vence, pedí uno nuevo con tu mail en la página del trámite. Nunca te vamos a pedir contraseñas ni datos de tarjeta por mail.`,
+      ],
+      boton: { texto: 'Continuar con el pago', url },
+    }));
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.post('/solicitudes/:id/observar', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    const lista = Array.isArray(req.body?.observaciones) ? req.body.observaciones : [];
+    const observaciones = lista
+      .map((o: { requisito?: unknown; texto?: unknown }) => ({
+        requisito: typeof o.requisito === 'string' && o.requisito ? o.requisito : null,
+        texto: String(o.texto ?? '').trim().slice(0, 2000),
+      }))
+      .filter((o: { texto: string }) => o.texto);
+    if (!observaciones.length) throw new ErrorSolicitud(400, 'Escribí al menos una observación.');
+
+    const s0 = await solicitudPorId(String(req.params.id));
+    if (!s0) throw new ErrorSolicitud(404, 'La solicitud no existe.');
+    const { tipo } = await solicitudPublica(s0);
+    const etiquetas = new Map(tipo.requisitos.map((r) => [r.clave, r.etiqueta]));
+    if (observaciones.some((o: { requisito: string | null }) => o.requisito && !etiquetas.has(o.requisito))) {
+      throw new ErrorSolicitud(400, 'Una observación apunta a un requisito que no existe.');
+    }
+
+    const s = await enTransaccion(async (client) => {
+      const s = await bloquear(client, s0.id);
+      exigirAccion(s, 'observar');
+      for (const o of observaciones) {
+        await client.query(
+          'insert into pagos.cons_observaciones (solicitud_id, requisito, texto, autor_id, autor_nombre, autor_email) values ($1, $2, $3, $4, $5, $6)',
+          [s.id, o.requisito, o.texto, yo.id, yo.nombre, yo.email],
+        );
+      }
+      await cambiarEstado(client, s, 'observada', { actor: 'tecnico', ...yo, nota: `${observaciones.length} observación(es).` }, tomarSiFalta(s, yo));
+      await auditar(client, req, 'observar', s, { estado: 'observada', observaciones });
+      return s;
+    });
+    await avisarConEnlace(s.id, ENLACE_AVISO, (url) => ({
+      para: s.email,
+      asunto: `Solicitud ${s.numero}: hay que corregir algunas cosas`,
+      titulo: 'Tu solicitud tiene observaciones',
+      parrafos: [
+        `Los técnicos revisaron la solicitud ${s.numero} y necesitan que corrijas lo siguiente:`,
+        ...observaciones.map((o: { requisito: string | null; texto: string }) => `• ${o.requisito ? `${etiquetas.get(o.requisito)}: ` : ''}${o.texto}`),
+        'Entrá con tu enlace, corregí lo indicado y volvé a enviarla.',
+        `El enlace es de un solo uso, personal, y se puede abrir durante ${textoDuracion(ENLACE_AVISO.ventanaMin)}. Si vence, pedí uno nuevo con tu mail en la página del trámite. Nunca te vamos a pedir contraseñas ni datos de tarjeta por mail.`,
+      ],
+      boton: { texto: 'Corregir la solicitud', url },
+    }));
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.post('/solicitudes/:id/rechazar', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    const motivo = String(req.body?.motivo ?? '').trim().slice(0, 2000);
+    if (!motivo) throw new ErrorSolicitud(400, 'Indicá el motivo del rechazo: se le envía a la persona.');
+    const s = await enTransaccion(async (client) => {
+      const s = await bloquear(client, String(req.params.id));
+      exigirAccion(s, 'rechazar');
+      await cambiarEstado(
+        client, s, 'rechazada', { actor: 'tecnico', ...yo, nota: motivo },
+        { ...tomarSiFalta(s, yo), ...resueltaPor(yo), motivo_rechazo: motivo },
+      );
+      await auditar(client, req, 'rechazar', s, { estado: 'rechazada', motivo });
+      return s;
+    });
+    await avisar({
+      para: s.email,
+      asunto: `Solicitud ${s.numero}: rechazada`,
+      titulo: 'Tu solicitud fue rechazada',
+      parrafos: [
+        `Los técnicos revisaron la solicitud ${s.numero} y no pudo aprobarse.`,
+        `Motivo: ${motivo}`,
+        'Si tenés dudas, comunicate con el Departamento de Control Ambiental. Podés iniciar una solicitud nueva cuando quieras.',
+      ],
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// --- Titulares y certificados (el padrón) ------------------------------------------------------------
+// Son datos personales (Ley 25.326): cada búsqueda y cada ficha abierta queda registrada.
+
+async function registrarConsulta(req: Request, criterio: string, termino: string, resultados: number) {
+  const yo = quien(req);
+  await pool.query(
+    'insert into pagos.cons_consultas_padron (actor_id, actor_email, actor_nombre, criterio, termino, resultados, ip) values ($1, $2, $3, $4, $5, $6, $7)',
+    [yo.id, yo.email, yo.nombre, criterio, termino.slice(0, 100), resultados, yo.ip],
+  );
+}
+
+panelRouter.get('/titulares', lectura, async (req, res, next) => {
+  try {
+    const q = String(req.query.q ?? '');
+    const r = await buscarTitulares(q);
+    if (r.criterio !== 'vacio') await registrarConsulta(req, r.criterio, q.trim(), r.filas.length);
+    res.json({ filas: r.filas });
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.get('/titulares/:id', lectura, async (req, res, next) => {
+  try {
+    const ficha = await fichaTitular(String(req.params.id));
+    if (!ficha) throw new ErrorSolicitud(404, 'El titular no existe.');
+    await registrarConsulta(req, 'titular', ficha.id, 1);
+    res.json(ficha);
+  } catch (e) {
+    next(e);
+  }
+});
+
+panelRouter.get('/certificados/:id/pdf', lectura, async (req, res, next) => {
+  try {
+    const r = await pdfDeCertificado(String(req.params.id));
+    if (!r) throw new ErrorSolicitud(404, 'El certificado no existe.');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+    res.send(r.pdf);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Revocar un certificado emitido por error o por infracción. No se borra: queda revocado con su motivo. */
+panelRouter.post('/certificados/:id/revocar', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    const motivo = String(req.body?.motivo ?? '').trim().slice(0, 500);
+    if (!motivo) throw new ErrorSolicitud(400, 'Indicá el motivo de la revocación.');
+    const id = /^[0-9a-f-]{36}$/i.test(String(req.params.id)) ? String(req.params.id) : '00000000-0000-0000-0000-000000000000';
+    // Revocación y auditoría en una sola transacción: no queda una sin la otra.
+    await enTransaccion(async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        `update public.cons_certificados set revocado_en = now(), revocado_motivo = $2, revocado_por = $3
+          where id = $1 and revocado_en is null returning id`,
+        [id, motivo, `${yo.nombre} <${yo.email}>`],
+      );
+      if (!rows[0]) throw new ErrorSolicitud(404, 'El certificado no existe o ya estaba revocado.');
+      await client.query(
+        "insert into pagos.auditoria (actor, accion, entidad, entidad_id, despues) values ($1, 'revocar', 'cons_certificado', $2, $3)",
+        [`ecodatos:${yo.email}`, rows[0].id, { motivo, ip: yo.ip }],
+      );
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Resolver la baja de un representante (la pidió otro representante, o el técnico decide). */
+panelRouter.post('/vinculos/:id/baja', edicion, async (req, res, next) => {
+  try {
+    const yo = quien(req);
+    const motivo = String(req.body?.motivo ?? '').trim().slice(0, 500);
+    if (!motivo) throw new ErrorSolicitud(400, 'Indicá el motivo de la baja.');
+    const id = Number(req.params.id) || 0;
+    const { rows } = await pool.query<{ email_canonico: string }>(
+      `update public.cons_vinculos set baja_en = now(), baja_por = $2, baja_motivo = $3
+        where id = $1 and baja_en is null returning email_canonico`,
+      [id, `${yo.nombre} <${yo.email}> (técnico)`, motivo],
+    );
+    if (!rows[0]) throw new ErrorSolicitud(404, 'El vínculo no existe o ya estaba dado de baja.');
+    await pool.query('delete from pagos.cons_sesiones where email_canonico = $1 and solicitud_id is null', [rows[0].email_canonico]);
+    await pool.query(
+      "insert into pagos.auditoria (actor, accion, entidad, entidad_id, despues) values ($1, 'baja_vinculo', 'cons_vinculo', $2, $3)",
+      [`ecodatos:${yo.email}`, String(id), { motivo, ip: yo.ip }],
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});

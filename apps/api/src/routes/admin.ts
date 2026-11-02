@@ -12,15 +12,18 @@ import {
   type TramiteAdmin,
 } from '@botonera/shared';
 import { pool } from '../db.js';
+import { requiereRecaudaciones } from '../core/auth-ecodatos.js';
 
 export const adminRouter = Router();
 
 const TZ = 'America/Argentina/Buenos_Aires';
 
-// Hasta que exista el login del panel, solo se habilita a mano en desarrollo local.
-adminRouter.use((_req, res, next) => {
-  if (process.env.ADMIN_SIN_LOGIN === 'true') return next();
-  res.status(503).json({ error: 'El panel todavía no tiene login; habilitalo con ADMIN_SIN_LOGIN=true solo en local.' });
+// Panel financiero: usuarios de Ecodatos que son admin/superadmin o pertenecen al área Recaudaciones.
+adminRouter.use(requiereRecaudaciones);
+
+adminRouter.get('/yo', (req, res) => {
+  const { id, email, nombre } = req.sesionPanel!.usuario;
+  res.json({ id, email, nombre });
 });
 
 /** Fecha de hoy en Argentina, YYYY-MM-DD. */
@@ -318,6 +321,7 @@ adminRouter.post('/tarifas', async (req, res, next) => {
       return;
     }
     const centavos = Math.round(pesosIngresados * 100);
+    const actor = req.sesionPanel!.usuario.email || req.sesionPanel!.usuario.id;
     const modulo = await pool.query<{ config: Partial<ConfigModulo> }>('select config from pagos.modulos where slug = $1', [moduloSlug]);
     if (!modulo.rows[0]) {
       res.status(404).json({ error: 'El trámite no existe.' });
@@ -341,12 +345,12 @@ adminRouter.post('/tarifas', async (req, res, next) => {
       await client.query('begin');
       await client.query(
         `insert into pagos.tarifas (modulo_slug, concepto, valor, vigente_desde, creado_por)
-         values ($1, $2, $3::jsonb, $4::date, 'panel-financiero')`,
-        [moduloSlug, concepto, JSON.stringify(centavos), vigenteDesde],
+         values ($1, $2, $3::jsonb, $4::date, $5)`,
+        [moduloSlug, concepto, JSON.stringify(centavos), vigenteDesde, actor],
       );
       await client.query(
-        "insert into pagos.auditoria (actor, accion, entidad, entidad_id, antes, despues) values ('panel-financiero', 'tarifa', 'tarifa', $1, $2, $3)",
-        [`${moduloSlug}/${concepto}`, { centavos: previa.rows[0]?.valor ?? null }, { centavos, vigenteDesde }],
+        "insert into pagos.auditoria (actor, accion, entidad, entidad_id, antes, despues) values ($4, 'tarifa', 'tarifa', $1, $2, $3)",
+        [`${moduloSlug}/${concepto}`, { centavos: previa.rows[0]?.valor ?? null }, { centavos, vigenteDesde }, actor],
       );
       await client.query('commit');
     } catch (e) {

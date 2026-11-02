@@ -367,7 +367,7 @@ Todo lo de abajo **se probó de punta a punta** contra la base local (alta de un
 | Panel: primera vez / renovaciones | `Lista.tsx` | ✔ Dos listas con filtros y conteos propios. |
 | Panel: búsqueda y ficha | `Titulares.tsx`, `FichaTitular.tsx` | ✔ Por DNI, CUIT, nombre, certificado o patente; cada consulta queda en `pagos.fito_consultas_padron`. Revocar certificados y resolver bajas. |
 | Avisos de vencimiento | `avisos.ts`, `npm run fitosanitarios:tareas` | ✔ 30 y 7 días antes y al vencer, un mail por casilla, sin repetir; reintenta los que fallaron. **Hay que programarlo en el cron del servidor** (una vez por día). |
-| Tasas editables | `POST /api/admin/tarifas`, `Tramites.tsx` | ✔ "Cambiar valor" en el panel financiero: agrega una versión con fecha de vigencia y queda auditada. Como todo `/api/admin`, no responde hasta que el panel tenga login (hoy `ADMIN_SIN_LOGIN=true` solo en local). |
+| Tasas editables | `POST /api/admin/tarifas`, `Tramites.tsx` | ✔ "Cambiar valor" en el panel financiero: agrega una versión con fecha de vigencia y queda auditada. Como todo `/api/admin`, exige login de Ecodatos (admin/superadmin o área Recaudaciones). |
 
 ### Para dejar andando el lunes
 

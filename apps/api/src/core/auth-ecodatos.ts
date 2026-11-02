@@ -21,6 +21,8 @@ const env = (k: string) => (process.env[k] ?? '').trim().replace(/\/+$/, '');
 export interface SesionPanel {
   usuario: UsuarioPanel;
   modulos: ModuloPanel[];
+  /** Claves de las áreas de Ecodatos a las que pertenece (ej. 'recaudaciones'). */
+  areas: string[];
 }
 
 declare module 'express-serve-static-core' {
@@ -101,6 +103,7 @@ export async function permisosDeUsuario(id: string, email: string): Promise<Sesi
   return {
     usuario: { id, email, nombre: perfil.rows[0]?.full_name ?? null, esAdmin },
     modulos: accesibles,
+    areas: areas.rows.map((a) => a.key),
   };
 }
 
@@ -162,4 +165,20 @@ export function requierePanel(slug: string, { edicion = false } = {}) {
       }
       next();
     });
+}
+
+/** Área de Ecodatos cuyos integrantes ven el panel financiero (el mismo criterio que la función SQL `recaudacion_puede_ver`). */
+export const AREA_RECAUDACIONES = 'recaudaciones';
+
+/** Panel financiero: admin o superadmin de Ecodatos, o integrante del área Recaudaciones. */
+export function requiereRecaudaciones(req: Request, res: Response, next: NextFunction) {
+  requiereSesionPanel(req, res, (err?: unknown) => {
+    if (err) return next(err);
+    const { usuario, areas } = req.sesionPanel!;
+    if (!usuario.esAdmin && !areas.includes(AREA_RECAUDACIONES)) {
+      res.status(403).json({ error: 'Tu usuario de Ecodatos no pertenece al área Recaudaciones.' });
+      return;
+    }
+    next();
+  });
 }

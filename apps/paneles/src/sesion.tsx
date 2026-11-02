@@ -23,6 +23,26 @@ async function tokenActual(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
+/**
+ * Abre un archivo (PDF) de la API en otra pestaña. Un enlace común no sirve: no lleva el token de la
+ * sesión. La pestaña se abre en el clic (antes de esperar la descarga) para que el navegador no la bloquee.
+ */
+export async function abrirPdf(ruta: string): Promise<void> {
+  const ventana = window.open('', '_blank');
+  try {
+    const token = await tokenActual();
+    const res = await fetch(`/api${ruta}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new ErrorApi(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'No se pudo abrir el archivo.');
+    const url = URL.createObjectURL(await res.blob());
+    if (ventana) ventana.location.href = url;
+    else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+  } catch (e) {
+    ventana?.close();
+    throw e;
+  }
+}
+
 export class ErrorApi extends Error {
   constructor(public status: number, mensaje: string) {
     super(mensaje);

@@ -9,12 +9,15 @@
     "dev:api": "node scripts/dev.mjs api",
     "dev:relevamiento": "npm run dev -w @botonera/relevamiento",
     "dev:web": "node scripts/dev.mjs web",
-    "build": "npm run build -w @botonera/web && npm run build -w @botonera/admin && npm run build -w @botonera/paneles && npm run build -w @botonera/api",
+    "build": "npm run build -w @botonera/web && npm run build -w @botonera/admin && npm run build -w @botonera/paneles && npm run build -w @botonera/sistema && npm run build -w @botonera/api",
     "migrate": "npm run migrate -w @botonera/api",
     "clave-botonera": "npm run clave-botonera -w @botonera/api",
     "fitosanitarios:tareas": "npm run fitosanitarios:tareas -w @botonera/api",
+    "consultores:tareas": "npm run consultores:tareas -w @botonera/api",
+    "reservas:tareas": "npm run reservas:tareas -w @botonera/api",
     "dev:admin": "node scripts/dev.mjs admin",
     "dev:paneles": "node scripts/dev.mjs paneles",
+    "dev:sistema": "node scripts/dev.mjs sistema",
     "dev": "node scripts/dev.mjs",
     "db:local": "node scripts/db-local.mjs"
   }

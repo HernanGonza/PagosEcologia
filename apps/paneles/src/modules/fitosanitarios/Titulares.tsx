@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Search } from 'lucide-react';
+import { VolverAtras } from '@/lib/volver';
+import { Search } from 'lucide-react';
 import type { TitularesResponse } from '@botonera/shared';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,9 +35,7 @@ export default function Titulares() {
 
   return (
     <div>
-      <Link to=".." className="mb-4 inline-flex items-center gap-1.5 text-sm text-verde-700 hover:underline">
-        <ArrowLeft className="size-4" /> Solicitudes
-      </Link>
+      <VolverAtras etiqueta="Solicitudes" className="mb-4 inline-flex items-center gap-1.5 text-sm text-verde-700 hover:underline" />
       <span className="block text-xs font-semibold tracking-[0.1em] text-rosa-600 uppercase">Fitosanitarios</span>
       <h1 className="mb-2 text-2xl font-medium text-verde-800">Titulares y certificados</h1>
       <p className="mb-5 text-sm text-muted-foreground">

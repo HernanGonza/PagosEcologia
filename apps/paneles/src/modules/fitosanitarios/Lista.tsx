@@ -9,14 +9,19 @@ import { ContinuousTabs } from '@/components/watermelon/continuous-tabs';
 import { api } from '../../sesion';
 import { EstadoBadge, RUTA, fecha, hace } from './comunes';
 
+/** Cada cuánto se vuelve a pedir la lista mientras se la mira. */
+const REFRESCO_MS = 30_000;
 const POR_PAGINA = 50;
 
-const pestanas: { id: string; label: string; estado?: EstadoSolicitud }[] = [
-  { id: 'enviada', label: 'Pendientes', estado: 'enviada' },
-  { id: 'en_revision', label: 'En revisión', estado: 'en_revision' },
-  { id: 'observada', label: 'Observadas', estado: 'observada' },
-  { id: 'aprobada', label: 'Aprobadas', estado: 'aprobada' },
-  { id: 'rechazada', label: 'Rechazadas', estado: 'rechazada' },
+/** `estados`: los estados que reúne la pestaña (sin `estados`, son todas). */
+const pestanas: { id: string; label: string; estados?: EstadoSolicitud[] }[] = [
+  { id: 'enviada', label: 'Pendientes', estados: ['enviada'] },
+  { id: 'en_revision', label: 'En revisión', estados: ['en_revision'] },
+  { id: 'observada', label: 'Observadas', estados: ['observada'] },
+  { id: 'aprobada', label: 'Aprobadas', estados: ['aprobada'] },
+  // Pagadas y con certificado emitido: lo ya terminado (la pagada sin emitir es el instante entre el pago y la emisión).
+  { id: 'emitidas', label: 'Certificado emitido', estados: ['pagada', 'emitida'] },
+  { id: 'rechazada', label: 'Rechazadas', estados: ['rechazada'] },
   { id: 'todas', label: 'Todas' },
 ];
 
@@ -47,21 +52,31 @@ export default function Lista() {
   useEffect(() => {
     let vigente = true;
     const filtro = new URLSearchParams({ limite: String(POR_PAGINA), desde_fila: String((pagina - 1) * POR_PAGINA), clase });
-    const estado = pestanas.find((p) => p.id === pestana)?.estado;
-    if (estado) filtro.set('estado', estado);
+    const estados = pestanas.find((p) => p.id === pestana)?.estados;
+    if (estados) filtro.set('estado', estados.join(','));
     if (q) filtro.set('q', q);
-    api<SolicitudesPanelResponse>(`${RUTA}/solicitudes?${filtro}`)
-      .then((r) => vigente && (setDatos(r), setError('')))
-      .catch((e) => vigente && setError(e.message));
+    // `silencioso`: los refrescos automáticos no muestran errores de red pasajeros ni vacían la lista.
+    const cargar = (silencioso = false) =>
+      api<SolicitudesPanelResponse>(`${RUTA}/solicitudes?${filtro}`)
+        .then((r) => vigente && (setDatos(r), setError('')))
+        .catch((e) => vigente && !silencioso && setError(e.message));
+    cargar();
+    // Se actualiza solo (cada 30 s y al volver a la pestaña del navegador): una solicitud nueva aparece
+    // en la lista y en el badge de las pestañas sin recargar. No pide nada con la pestaña en segundo plano.
+    const refrescar = () => document.visibilityState === 'visible' && cargar(true);
+    const intervalo = setInterval(refrescar, REFRESCO_MS);
+    document.addEventListener('visibilitychange', refrescar);
     return () => {
       vigente = false;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', refrescar);
     };
   }, [pestana, q, pagina, clase]);
 
   const conteo = (p: (typeof pestanas)[number]) => {
     if (!datos) return undefined;
-    if (!p.estado) return Object.values(datos.porEstado).reduce((a, b) => a + (b ?? 0), 0);
-    return datos.porEstado[p.estado] ?? 0;
+    if (!p.estados) return Object.values(datos.porEstado).reduce((a, b) => a + (b ?? 0), 0);
+    return p.estados.reduce((suma, e) => suma + (datos.porEstado[e] ?? 0), 0);
   };
   const paginas = datos ? Math.max(Math.ceil(datos.total / POR_PAGINA), 1) : 1;
 
@@ -98,6 +113,15 @@ export default function Lista() {
             className={`rounded-md px-4 py-1.5 font-medium transition-colors ${clase === id ? 'bg-verde-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {texto}
+            {(datos?.pendientesPorClase[id] ?? 0) > 0 && (
+              <span
+                className={`ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums ${clase === id ? 'bg-white text-verde-700' : 'bg-rosa-600 text-white'}`}
+                title="Solicitudes nuevas esperando revisión"
+                aria-label={`${datos!.pendientesPorClase[id]} nuevas`}
+              >
+                {datos!.pendientesPorClase[id]}
+              </span>
+            )}
           </button>
         ))}
       </div>

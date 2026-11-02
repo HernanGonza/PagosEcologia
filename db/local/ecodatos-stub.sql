@@ -57,9 +57,11 @@ create table if not exists public.usuarios_rol (
   activo  boolean not null default true
 );
 create table if not exists public.areas (
-  id     uuid primary key default gen_random_uuid(),
-  key    text not null unique,
-  activo boolean not null default true
+  id          uuid primary key default gen_random_uuid(),
+  key         text not null unique,
+  nombre      text,
+  descripcion text,
+  activo      boolean not null default true
 );
 create table if not exists public.formularios (
   id     uuid primary key default gen_random_uuid(),
@@ -78,6 +80,23 @@ create table if not exists public.usuarios_formularios (
   es_editor     boolean not null default true
 );
 
+-- Columnas que la base real ya tiene (para bases locales armadas con una versión anterior de este archivo).
+alter table public.roles add column if not exists activo boolean not null default true;
+alter table public.profiles add column if not exists email text;
+alter table public.areas add column if not exists nombre text;
+alter table public.areas add column if not exists descripcion text;
+
+-- Rol que Supabase le da a los usuarios con sesión (0016 le da permiso a las funciones de estadísticas).
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+end $$;
+
+-- auth.uid() de Supabase: toma el usuario de los claims del pedido (como PostgREST). Sin claims, null.
+create schema if not exists auth;
+create or replace function auth.uid() returns uuid language sql stable as $$
+  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+$$;
+
 -- Persona de pruebas con rol superadmin: entra a todos los paneles (ver AUTH_LOCAL).
 insert into public.roles (key) values ('superadmin') on conflict (key) do nothing;
 insert into public.profiles (id, full_name)
@@ -86,4 +105,4 @@ on conflict (id) do nothing;
 insert into public.usuarios_rol (user_id, rol_id)
 select '00000000-0000-0000-0000-000000000001', id from public.roles where key = 'superadmin'
  and not exists (select 1 from public.usuarios_rol where user_id = '00000000-0000-0000-0000-000000000001');
-insert into public.formularios (slug) values ('fitosanitarios_domisanitarios') on conflict (slug) do nothing;
+insert into public.formularios (slug) values ('fitosanitarios_domisanitarios'), ('registro_consultores'), ('registro_reservas_privadas') on conflict (slug) do nothing;

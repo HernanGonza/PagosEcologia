@@ -6,7 +6,7 @@ import { BarChart3, Receipt, ShieldCheck } from 'lucide-react';
 import flor from '@botonera/marca/logos/flor-lapacho.svg';
 import logoBlanco from '@botonera/marca/logos/ecologia-misiones-vertical-blanco.svg';
 import logoColor from '@botonera/marca/logos/ecologia-misiones-horizontal.svg';
-import { LOGIN_CONECTADO, useSesion } from './sesion';
+import { supabaseConfigurado, useSesion } from './sesion';
 
 const contenedor: Variants = {
   hidden: { opacity: 0 },
@@ -39,7 +39,8 @@ function TresFlores({ className }: { className?: string }) {
 }
 
 export default function Login() {
-  const { usuario, iniciarSesion } = useSesion();
+  const { estado, entrar: iniciarSesion } = useSesion();
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState('');
@@ -47,13 +48,19 @@ export default function Login() {
   const [entrando, setEntrando] = useState(false);
   const destino = (location.state as { desde?: string } | null)?.desde ?? '/';
 
-  if (usuario) return <Navigate to={destino} replace />;
+  if (estado.tipo === 'lista') return <Navigate to={destino} replace />;
 
   async function entrar(e: FormEvent) {
     e.preventDefault();
     setEntrando(true);
-    await iniciarSesion(email, clave);
-    navigate(destino, { replace: true });
+    setError('');
+    try {
+      await iniciarSesion(email.trim(), clave);
+      navigate(destino, { replace: true });
+    } catch (err) {
+      setError((err as Error).message);
+      setEntrando(false);
+    }
   }
 
   return (
@@ -89,29 +96,25 @@ export default function Login() {
             </h2>
           </motion.div>
 
-          {!LOGIN_CONECTADO ? (
-            <motion.div
-              variants={item}
-              className="mb-8 rounded-[14px] border border-aviso/25 px-4 py-3 text-[13px] leading-5 text-aviso"
-              style={{ backgroundColor: 'color-mix(in oklab, var(--amarillo-400) 18%, white)' }}
-            >
-              El ingreso todavía no está conectado: tocá <b>Ingresar</b> para entrar directo, sin completar nada.
+          {!supabaseConfigurado ? (
+            <motion.div variants={item} className="mb-8 rounded-[14px] border border-destructive/25 bg-destructive/8 px-4 py-3 text-[13px] leading-5 text-destructive">
+              Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en el .env.
             </motion.div>
           ) : null}
 
           <form className="flex flex-col gap-5" onSubmit={entrar}>
             <motion.div variants={item} className="flex flex-col gap-2">
               <label htmlFor="email" className="text-sm font-medium text-verde-800">
-                Correo institucional
+                Mail de Ecodatos
               </label>
               <input
                 id="email"
                 type="email"
                 autoComplete="username"
-                placeholder="nombre@ecologia.misiones.gob.ar"
+                placeholder="tu mail de Ecodatos"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required={LOGIN_CONECTADO}
+                required
                 className={claseInput}
               />
             </motion.div>
@@ -127,15 +130,17 @@ export default function Login() {
                 placeholder="Tu contraseña"
                 value={clave}
                 onChange={(e) => setClave(e.target.value)}
-                required={LOGIN_CONECTADO}
+                required
                 className={claseInput}
               />
             </motion.div>
 
+            {error ? <motion.p variants={item} role="alert" className="rounded-lg bg-destructive/8 px-4 py-3 text-sm text-destructive">{error}</motion.p> : null}
+
             <motion.div variants={item} className="mt-4">
               <button
                 type="submit"
-                disabled={entrando}
+                disabled={entrando || !supabaseConfigurado}
                 className="w-full rounded-full bg-verde-600 py-3.5 text-sm font-medium text-white shadow-[0_6px_20px_rgba(62,108,81,0.25)] transition-transform hover:bg-verde-700 focus-visible:ring-3 focus-visible:ring-rosa-600/35 focus-visible:outline-none active:scale-[0.96] disabled:opacity-60"
               >
                 {entrando ? 'Ingresando…' : 'Ingresar'}
@@ -144,7 +149,7 @@ export default function Login() {
           </form>
 
           <motion.p variants={item} className="mt-6 text-center text-[13px] text-muted-foreground">
-            ¿Problemas para ingresar? Escribí al área de sistemas del Ministerio.
+            Es el mismo usuario que usás en Ecodatos. Entran el equipo de Recaudaciones y los administradores.
           </motion.p>
         </motion.div>
       </div>

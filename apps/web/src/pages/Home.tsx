@@ -6,19 +6,24 @@ import flor from '@botonera/marca/logos/flor-lapacho.svg';
 import Icono from '../components/Icono';
 import Marco from '../components/Marco';
 import { modulosMenu } from '../modules/registry';
+import { useEstadoPublico } from '../lib/estado-publico';
+import { Mantenimiento } from '../lib/modulos-activos';
 
 export default function Home() {
   const [busqueda, setBusqueda] = useState('');
+  const { activos, mantenimiento } = useEstadoPublico();
   const grupos = useMemo(() => {
     const q = busqueda.trim().toLocaleLowerCase('es-AR');
-    const visibles = modulosMenu.filter((modulo) =>
-      !q || `${modulo.nombre} ${modulo.descripcion} ${modulo.categoria}`.toLocaleLowerCase('es-AR').includes(q),
+    const visibles = modulosMenu.filter((modulo) => (!activos || activos.has(modulo.slug)) &&
+      (!q || `${modulo.nombre} ${modulo.descripcion} ${modulo.categoria}`.toLocaleLowerCase('es-AR').includes(q)),
     );
     return [...new Set(visibles.map((modulo) => modulo.categoria))].map((categoria) => ({
       categoria,
       modulos: visibles.filter((modulo) => modulo.categoria === categoria),
     }));
-  }, [busqueda]);
+  }, [busqueda, activos]);
+
+  if (mantenimiento) return <Mantenimiento mensaje={mantenimiento.mensaje} />;
 
   return (
     <Marco>
@@ -49,14 +54,14 @@ export default function Home() {
 
       <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         {!grupos.length && <p className="text-center text-muted-foreground">No encontramos trámites con esa búsqueda.</p>}
-        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-10">
           {grupos.map((grupo) => (
             <section key={grupo.categoria}>
               <h2 className="mb-4 flex items-center gap-2 text-lg font-medium text-verde-700">
                 <span className="h-4 w-1 rounded-full bg-rosa-600" aria-hidden="true" />
                 {grupo.categoria}
               </h2>
-              <div className="flex flex-col gap-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {grupo.modulos.map((modulo, i) => (
                   <motion.div
                     key={modulo.slug}

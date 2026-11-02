@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import AvisoPublico from './AvisoPublico';
 import logo from '@botonera/marca/logos/ecologia-misiones-horizontal.svg';
 import logoBlanco from '@botonera/marca/logos/ecologia-misiones-horizontal-blanco.svg';
 
@@ -7,6 +8,7 @@ import logoBlanco from '@botonera/marca/logos/ecologia-misiones-horizontal-blanc
 export default function Marco({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col bg-crema font-marca text-foreground">
+      <AvisoPublico />
       <header className="border-b border-border bg-white print:hidden">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <Link to="/" aria-label="Inicio: pagos y trámites">

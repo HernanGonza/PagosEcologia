@@ -23,3 +23,12 @@ export async function exigirMigraciones(): Promise<void> {
     throw new Error(`Faltan migraciones en esta base: ${faltan.join(', ')}. Corré \`npm run migrate\` (con MIGRATIONS_DATABASE_URL) antes de levantar la API.`);
   }
 }
+
+/** Para el panel del sistema: qué migraciones hay en el repo, cuáles están aplicadas en esta base y cuáles faltan. */
+export async function estadoMigraciones(): Promise<{ enRepo: number; aplicadas: number; ultima: string | null; faltan: string[] }> {
+  const dir = fileURLToPath(new URL('../../../../db/migrations/', import.meta.url));
+  const archivos = await readdir(dir).then((f) => f.filter((x) => x.endsWith('.sql')).sort(), () => [] as string[]);
+  const { rows } = await pool.query<{ archivo: string }>('select archivo from pagos._migraciones order by archivo');
+  const hechas = new Set(rows.map((r) => r.archivo));
+  return { enRepo: archivos.length, aplicadas: hechas.size, ultima: rows.at(-1)?.archivo ?? null, faltan: archivos.filter((f) => !hechas.has(f)) };
+}

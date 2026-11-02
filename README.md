@@ -360,7 +360,7 @@ Fitosanitarios es el ejemplo completo: `solicitudes.ts`, `publico.ts` y `panel.t
 ```bash
 npm run dev:api      # API en :3001 (necesita DATABASE_URL)
 npm run dev:web      # botonera
-npm run dev:admin    # panel (necesita ADMIN_SIN_LOGIN=true)
+npm run dev:admin    # panel de Recaudaciones (login de Ecodatos)
 npm run build        # typecheck y build de web, admin y api: tiene que pasar sin errores
 ```
 
@@ -577,8 +577,9 @@ El catálogo genérico de ejemplo se retiró para empezar el primer módulo con 
 - Base visual: el bloque `capitalio-dashboard`, que queda sin tocar en `src/components/watermelon/`; el panel propio vive en `src/panel/` y reutiliza su CSS, tarjetas, tooltips e íconos.
 - Pantallas: Resumen (indicadores, recaudación por día/mes, por trámite, últimos pagos), Pagos y órdenes (filtros, búsqueda, paginado, CSV), Trámites y tarifas, Auditoría. Conciliación y Reportes quedan como pendientes de definir.
 - API: `GET /api/admin/resumen?periodo=hoy|7d|30d|anio`, `/ordenes`, `/tramites`, `/auditoria` y `POST /tarifas` (agrega una versión de tarifa con fecha de vigencia; 409 si ya hay una para esa fecha) (tipos en `packages/shared/src/admin.ts`).
-- **Login preparado, sin conectar:** `/login` (adaptado de Watermelon `auth-11`) deja entrar sin completar nada. Todo pasa por `src/panel/sesion.tsx` (`LOGIN_CONECTADO`, `iniciarSesion`, `RequiereSesion`); conectar el login es cambiar ese archivo y el middleware de `apps/api/src/routes/admin.ts`. Tipos de usuario y roles en `packages/shared/src/admin.ts`.
-- `/api/admin` responde solo con `ADMIN_SIN_LOGIN=true`, y eso es solo para desarrollo local.
+- **Login con Ecodatos:** `/login` usa el usuario de Ecodatos (`src/panel/sesion.tsx`). La API (`/api/admin`, middleware `requiereRecaudaciones`) deja pasar a admin/superadmin de Ecodatos y a quienes pertenecen al área **Recaudaciones** (migración 0016). Cada cambio de tarifa queda auditado con el mail de quien lo hizo.
+- **Estadísticas en Ecodatos:** función `public.recaudacion_estadisticas(p_desde, p_hasta)` (RPC de Supabase, migración 0016): totales, por trámite y por día; solo para admin/superadmin y el área Recaudaciones.
+- **Administración del sistema** (`apps/sistema`, puerto 5177, `/api/sistema`): encender y apagar módulos; solo admin/superadmin de Ecodatos.
 
 ### 🎨 Decisiones de diseño tomadas
 
@@ -594,7 +595,8 @@ npm install
 cp .env.example .env     # completar DATABASE_URL (solo si se usa la API)
 npm run dev:web          # front
 npm run dev:api          # API (requiere DATABASE_URL)
-npm run dev:admin        # panel de Recaudaciones → http://localhost:5174 (requiere ADMIN_SIN_LOGIN=true en .env)
+npm run dev:admin        # panel de Recaudaciones → http://localhost:5174 (login de Ecodatos)
+npm run dev:sistema      # administración del sistema → http://localhost:5177 (login de Ecodatos, solo admin)
 npm run dev:paneles      # paneles de área → http://localhost:5176 (login de Ecodatos)
 ```
 

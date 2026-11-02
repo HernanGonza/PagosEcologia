@@ -3,10 +3,14 @@ import cors from 'cors';
 import { modulosRouter } from './routes/modulos.js';
 import { adminRouter } from './routes/admin.js';
 import { panelesRouter } from './routes/paneles.js';
+import { sistemaRouter } from './routes/sistema.js';
 import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
+import { consultoresRouter } from './modules/consultores/index.js';
+import { reservasRouter } from './modules/reservas/index.js';
 import { descargarArchivo, storageLocalDir } from './core/storage.js';
 import { exigirCorreoReal } from './core/correo.js';
 import { exigirSecretoDeCodigos } from './core/verificacion.js';
+import { moduloActivo } from './core/modulo-activo.js';
 import { exigirMigraciones } from './core/migraciones.js';
 
 // En producción no se arranca con la configuración de desarrollo.
@@ -19,7 +23,6 @@ if (process.env.NODE_ENV === 'production' && !process.env.TRUST_PROXY?.trim()) {
 
 // Guardas de producción: nada de configuración de desarrollo.
 if (process.env.NODE_ENV === 'production') {
-  if (process.env.ADMIN_SIN_LOGIN === 'true') throw new Error('ADMIN_SIN_LOGIN=true no puede usarse en producción: el panel financiero quedaría abierto.');
   if (process.env.PAYMENT_PROVIDER !== 'macroclick') throw new Error('En producción PAYMENT_PROVIDER debe ser macroclick: el proveedor mock acepta cualquier webhook.');
   if (!(process.env.CORS_ORIGINS ?? process.env.WEB_URL)?.trim()) throw new Error('Falta WEB_URL (o CORS_ORIGINS) en el .env: orígenes permitidos para la API.');
 }
@@ -39,7 +42,10 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/modulos', modulosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/paneles', panelesRouter);
-app.use('/api/fitosanitarios', fitosanitariosRouter);
+app.use('/api/sistema', sistemaRouter);
+app.use('/api/fitosanitarios', moduloActivo('fitosanitarios'), fitosanitariosRouter);
+app.use('/api/consultores', moduloActivo('consultores'), consultoresRouter);
+app.use('/api/reservas', moduloActivo('reservas'), reservasRouter);
 
 // Solo con STORAGE_LOCAL_DIR (desarrollo sin red): hace de "enlace firmado" para los archivos locales.
 if (storageLocalDir()) {

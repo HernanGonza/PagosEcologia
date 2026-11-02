@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download, FileText, Hand, ImageIcon, Loader2, MessageSquareWarning, X, ZoomIn, ZoomOut } from 'lucide-react';
-import type { PersonaRevision, RequisitoSolicitud, SolicitudPanel } from '@botonera/shared';
+import type { CertificadoVista, PersonaRevision, RequisitoSolicitud, SolicitudPanel } from '@botonera/shared';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { avisoError, avisoExito, cargando, confirmar } from '@/lib/alertas';
 import { cn } from '@/lib/utils';
 import { usePendientes } from '../../pendientes';
-import { api } from '../../sesion';
+import { VolverAtras } from '@/lib/volver';
+import { abrirPdf, api } from '../../sesion';
 import { EstadoBadge, RUTA, fecha, fechaHora } from './comunes';
 
 type Accion = 'aprobar' | 'observar' | 'rechazar';
@@ -127,6 +128,7 @@ export default function Detalle() {
 
       {error && <p className="mb-4 rounded-xl bg-destructive/8 px-4 py-3 text-sm text-destructive">{error}</p>}
       <Situacion s={s} abiertas={abiertas.length} />
+      {s.certificado && <CertificadoEmitido cert={s.certificado} />}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <section className="rounded-2xl border border-border bg-white">
@@ -193,11 +195,39 @@ export default function Detalle() {
 function Volver({ children }: { children: ReactNode }) {
   return (
     <div>
-      <Link to=".." relative="path" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Volver a las solicitudes
-      </Link>
+      <VolverAtras etiqueta="Volver a las solicitudes" relative="path" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground" />
       {children}
     </div>
+  );
+}
+
+/** El certificado que emitió esta solicitud: datos de vigencia y el PDF (con su QR) tal como lo recibe la persona. */
+function CertificadoEmitido({ cert }: { cert: CertificadoVista }) {
+  const estados = { vigente: 'Vigente', por_comenzar: 'Vigencia por comenzar', vencido: 'Vencido', revocado: 'Revocado' } as const;
+  async function ver() {
+    try {
+      await abrirPdf(`${RUTA}/certificados/${cert.id}/pdf`);
+    } catch (e) {
+      avisoError('No se pudo abrir el certificado', (e as Error).message);
+    }
+  }
+  return (
+    <section className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-verde-500/40 bg-white p-5">
+      <div>
+        <h2 className="font-medium text-verde-800">Certificado emitido</h2>
+        <p className="mt-1 text-sm">
+          <strong className="tabular-nums">{cert.numero}</strong> ·{' '}
+          <span className={cn(cert.estado === 'vigente' ? 'text-ok' : cert.estado === 'por_comenzar' ? 'text-muted-foreground' : 'text-destructive')}>{estados[cert.estado]}</span>
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Válido del {fecha(cert.vigenteDesde)} al {fecha(cert.venceEn)} · emitido el {fecha(cert.emitidoEn)}
+        </p>
+        {cert.revocadoMotivo && <p className="mt-1 text-sm text-destructive">Revocado: {cert.revocadoMotivo}</p>}
+      </div>
+      <Button onClick={ver}>
+        <FileText /> Ver certificado
+      </Button>
+    </section>
   );
 }
 

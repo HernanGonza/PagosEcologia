@@ -16,4 +16,18 @@ export const modulosMenu: ModuloMenu[] = [
     categoria: 'Registros y certificados',
     icono: 'leaf',
   },
+  {
+    slug: 'consultores',
+    nombre: 'Registro de consultores',
+    descripcion: 'Inscribite como consultor/a ambiental: presentá los requisitos en línea.',
+    categoria: 'Registros y certificados',
+    icono: 'user-check',
+  },
+  {
+    slug: 'reservas',
+    nombre: 'Reservas privadas',
+    descripcion: 'Inscribí tu reserva privada: presentá los requisitos en línea.',
+    categoria: 'Registros y certificados',
+    icono: 'trees',
+  },
 ];

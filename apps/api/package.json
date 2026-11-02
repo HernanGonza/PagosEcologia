@@ -8,6 +8,8 @@
     "build": "tsc --noEmit",
     "migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
     "fitosanitarios:tareas": "tsx --env-file-if-exists=../../.env src/modules/fitosanitarios/tareas.ts",
+    "consultores:tareas": "tsx --env-file-if-exists=../../.env src/modules/consultores/tareas.ts",
+    "reservas:tareas": "tsx --env-file-if-exists=../../.env src/modules/reservas/tareas.ts",
     "clave-botonera": "tsx --env-file-if-exists=../../.env scripts/clave-botonera.ts"
   },
   "dependencies": {

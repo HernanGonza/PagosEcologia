@@ -3,8 +3,8 @@
 //   - fuera de la red: levanta el Postgres local de pruebas (scripts/db-local.mjs) y apunta todo ahí,
 //     con Storage en disco y sin login (no hay Supabase al que preguntarle).
 // Se puede forzar con DB_MODE=local o DB_MODE=ecodatos.
-//   npm run dev            api + web + admin + paneles
-//   npm run dev:api        solo una (api | web | admin | paneles)
+//   npm run dev            api + web + admin + paneles + sistema
+//   npm run dev:api        solo una (api | web | admin | paneles | sistema)
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { asegurarBaseLocal } from './db-local.mjs';
 
 const raiz = fileURLToPath(new URL('..', import.meta.url));
-const TODAS = ['api', 'web', 'admin', 'paneles'];
+const TODAS = ['api', 'web', 'admin', 'paneles', 'sistema'];
 const pedidas = process.argv.slice(2);
 const apps = pedidas.length ? pedidas : TODAS;
 for (const a of apps) if (!TODAS.includes(a)) throw new Error(`App desconocida: ${a} (${TODAS.join(' | ')})`);
@@ -56,7 +56,6 @@ if (local) {
     STORAGE_LOCAL_DIR: path.join(raiz, '.local/storage'),
     AUTH_LOCAL: 'true',
     VITE_AUTH_LOCAL: 'true',
-    ADMIN_SIN_LOGIN: 'true',
     MAIL_PROVIDER: 'consola',
   });
 } else {

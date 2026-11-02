@@ -5,6 +5,8 @@
  * acá para que el front y el back apliquen exactamente las mismas.
  */
 
+import type { CertificadoVista } from './titulares.js';
+
 export type TipoRequisito = 'texto' | 'numero' | 'fecha' | 'opcion' | 'documento';
 
 export interface RequisitoSolicitud {
@@ -227,6 +229,8 @@ export interface SolicitudResumenPanel {
 export interface SolicitudesPanelResponse {
   total: number;
   porEstado: Partial<Record<EstadoSolicitud, number>>;
+  /** Solicitudes nuevas (enviadas, que ningún técnico tomó) de cada lista: lo que muestra el badge de las pestañas. */
+  pendientesPorClase: Record<'alta' | 'renovacion', number>;
   filas: SolicitudResumenPanel[];
 }
 
@@ -245,6 +249,8 @@ export interface SolicitudPanel extends Omit<SolicitudPublica, 'documentos' | 'p
   resuelta: PersonaRevision | null;
   documentos: (DocumentoSolicitud & { url: string; reemplazado: boolean })[];
   titularId: string | null;
+  /** Certificado que emitió la solicitud (estado `emitida`). */
+  certificado: CertificadoVista | null;
   /** Qué acciones admite el estado actual (y el permiso del usuario). */
   acciones: ('tomar' | 'aprobar' | 'observar' | 'rechazar')[];
 }

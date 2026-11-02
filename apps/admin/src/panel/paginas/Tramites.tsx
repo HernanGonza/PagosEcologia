@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { TarifaVersionAdmin, TramiteAdmin } from '@botonera/shared';
 import { DashboardCard, DetailHeader, DetailTag } from '@/components/watermelon/capitalio-dashboard/components/capitalio/shared';
 import { formatoPesos, useApi } from '../api';
+import { fetchAutenticado } from '../sesion';
 import { EstadoCarga, Pagina, Vacio } from '../comunes';
 
 const tipos: Record<string, string> = { simple: 'Simple', consulta: 'Con consulta', complejo: 'Complejo' };
@@ -55,7 +56,7 @@ function CambiarValor({ modulo, concepto, alGuardar }: { modulo: string; concept
     setGuardando(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/tarifas', {
+      const res = await fetchAutenticado('/api/admin/tarifas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ moduloSlug: modulo, concepto, importePesos: Number(importe.replace(',', '.')), vigenteDesde: desde }),

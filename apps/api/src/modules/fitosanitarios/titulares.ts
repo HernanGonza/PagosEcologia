@@ -131,6 +131,18 @@ export async function configRenovacion(): Promise<ConfigRenovacion> {
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
+/** Un certificado puntual (el que emitió una solicitud), o null si no existe. */
+export async function certificadoPorId(id: string): Promise<CertificadoVista | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const { rows } = await pool.query<FilaCert>(
+    `select c.id, c.registro_id, c.numero, c.vigente_desde::text, c.vence_en::text, c.emitido_en, c.estado, c.dias_para_vencer,
+            c.renovado_de, c.codigo_verificacion, c.revocado_en, c.revocado_motivo
+       from public.fito_certificados_estado c where c.id = $1`,
+    [id],
+  );
+  return rows[0] ? certVista(rows[0]) : null;
+}
+
 interface FilaCert {
   id: string; registro_id: string; numero: string; vigente_desde: string; vence_en: string; emitido_en: Date; estado: EstadoCertificado;
   dias_para_vencer: number; renovado_de: string | null; codigo_verificacion: string; revocado_en: Date | null; revocado_motivo: string | null;

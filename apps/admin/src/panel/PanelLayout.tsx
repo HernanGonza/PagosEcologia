@@ -25,7 +25,7 @@ import '@/components/watermelon/capitalio-dashboard/dashboard.css';
 import { cn } from '@/lib/utils';
 import { ContinuousTabs } from '@/components/watermelon/continuous-tabs';
 import { itemDeRuta, seccionesNavegacion, type ItemNavegacion } from './navegacion';
-import { LOGIN_CONECTADO, useSesion } from './sesion';
+import { useSesion } from './sesion';
 
 export const periodos: { valor: PeriodoAdmin; etiqueta: string }[] = [
   { valor: 'hoy', etiqueta: 'Hoy' },
@@ -76,16 +76,16 @@ function ItemMenu({ item }: { item: ItemNavegacion }) {
   );
 }
 
-const roles = { administrador: 'Administración', recaudaciones: 'Recaudaciones', area: 'Responsable de área', auditor: 'Auditoría' };
-
 function PieUsuario() {
-  const { usuario, cerrarSesion } = useSesion();
+  const { estado, salir: cerrarSesion } = useSesion();
   const navigate = useNavigate();
-  if (!usuario) return null;
-  const iniciales = usuario.nombre.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  if (estado.tipo !== 'lista') return null;
+  const { usuario } = estado;
+  const nombre = usuario.nombre ?? usuario.email;
+  const iniciales = nombre.split(/[\s@.]+/).filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 
-  function salir() {
-    cerrarSesion();
+  async function salir() {
+    await cerrarSesion();
     navigate('/login', { replace: true });
   }
 
@@ -97,9 +97,9 @@ function PieUsuario() {
           <AvatarFallback className="rounded-lg">{iniciales}</AvatarFallback>
         </Avatar>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="truncate text-sm leading-none font-medium text-sidebar-accent-foreground">{usuario.nombre}</span>
+          <span className="truncate text-sm leading-none font-medium text-sidebar-accent-foreground">{nombre}</span>
           <span className="truncate text-xs text-muted-foreground">
-            {LOGIN_CONECTADO ? roles[usuario.rol] : 'Sin login (desarrollo)'}
+            Recaudaciones
           </span>
         </div>
         <Button size="icon" variant="ghost" className="group shrink-0" onClick={salir} aria-label="Cerrar sesión" title="Cerrar sesión">
