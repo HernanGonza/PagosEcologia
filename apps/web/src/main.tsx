@@ -21,7 +21,7 @@ const ReservasVerificar = lazy(() => import('./modules/reservas/Verificar'));
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<Home />} />

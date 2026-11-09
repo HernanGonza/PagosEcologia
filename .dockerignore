@@ -1,0 +1,11 @@
+.git
+.claude
+.local
+.env
+**/node_modules
+**/dist
+graft
+docs
+ecodatos
+apps/relevamiento/data
+*.md

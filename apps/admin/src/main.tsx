@@ -18,7 +18,7 @@ const cargando = <div className="p-8 text-sm text-muted-foreground">Cargando…<
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <TooltipProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         <SesionProvider>
           <Suspense fallback={cargando}>
             <Routes>

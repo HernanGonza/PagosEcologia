@@ -41,7 +41,7 @@ Después: `select count(*) from pagos._migraciones;` debe dar **17**, y la API a
 **Sin** `EMISION_SIMULADA`, **sin** `AUTH_LOCAL`, **sin** `MAIL_PROVIDER=consola`: la API se niega a arrancar en producción con ellos.
 `ADMIN_SIN_LOGIN` ya no existe. Se puede verificar todo en la pantalla **Estado** del sistema (alertas en rojo).
 
-## 5. Qué publicar (`npm run build`)
+## 5. Qué publicar (`npm run build`) — Docker armado: ver `docs/despliegue-docker.md`
 Cuatro fronts estáticos + la API: `apps/web` (público), `apps/admin` (Recaudaciones, login Ecodatos), `apps/paneles` (técnicos),
 **`apps/sistema` (nuevo: administración técnica, solo admin/superadmin de Ecodatos)**. Dev: 5173 / 5174 / 5176 / 5177. Los cuatro llaman a `/api` (proxy a la API :3001).
 Conviene que `sistema` quede en una dirección no enlazada desde ningún lado.

@@ -75,7 +75,7 @@ function Panel({ slug }: { slug: string }) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <SesionProvider>
         <Suspense fallback={null}>
           <Routes>
