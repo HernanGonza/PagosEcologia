@@ -122,11 +122,13 @@ async function conSesion(req: Request, res: Response, next: NextFunction) {
   try {
     const cookie = leerCookie(req);
     let s = cookie ? await solicitudPorSesion(cookie) : null;
-    // Una sesión de persona (tablero) puede abrir las solicitudes de su propio mail indicando el número.
+    // Si piden una solicitud concreta (cabecera X-Solicitud, desde "Mis certificados") y no es la de la cookie,
+    // se abre la pedida cuando es del mismo mail: la sesión de una solicitud también vale como sesión de persona.
     const numero = req.get('x-solicitud');
-    if (!s && cookie && numero) {
+    if (cookie && numero && s?.numero !== numero) {
       const persona = await personaPorSesion(cookie);
-      if (persona) s = await solicitudDeLaPersona(persona.emailCanonico, numero);
+      const pedida = persona ? await solicitudDeLaPersona(persona.emailCanonico, numero) : null;
+      s = pedida; // si no es suya, no se cae en la solicitud de la cookie: se pide una sesión válida
     }
     if (!s) {
       res.status(401).json({ error: 'Tu sesión venció o el enlace ya no vale. Pedí uno nuevo con tu mail.', codigo: 'enlace_invalido' });
