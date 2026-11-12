@@ -11,12 +11,14 @@ import { descargarArchivo, subirArchivo, tipoPorContenido } from '../../core/sto
 import { emailCanonico, emailValido, normalizarEmail, pedirCodigo, verificarCodigo } from '../../core/verificacion.js';
 import { renovacionSinCambios } from './renovaciones.js';
 import { emitirCertificado, pdfDeCertificado, urlVerificacion } from './certificados.js';
+import { registrarPagoSimulado } from '../../core/pago-simulado.js';
 import { esRepresentante } from './titulares.js';
 import {
   BUCKET,
   ENLACE_INICIO,
   ENLACE_SESION,
   ErrorSolicitud,
+  MODULO,
   PROPOSITO_CODIGO,
   PROPOSITO_PERSONA,
   PROPOSITO_RECUPERAR,
@@ -587,7 +589,12 @@ publicoRouter.post('/solicitud/pagar-simulado', conSesion, async (_req, res, nex
     const c = await enTransaccion(async (client) => {
       const fila = await bloquear(client, s.id);
       if (fila.estado !== 'aprobada') throw new ErrorSolicitud(409, 'La solicitud tiene que estar aprobada para poder pagarla.');
+      const importe = (await tipoPublico(await configModulo(), fila.tipo)).importeCentavos;
+      if (!importe || importe <= 0) throw new ErrorSolicitud(409, 'Este trámite no tiene una tarifa cargada: cargala en el panel de Recaudaciones.');
       await cambiarEstado(client, fila, 'pagada', { actor: 'solicitante', nota: 'Pago simulado (demostración).' });
+      // Deja la orden, el pago y el comprobante como un pago real: así el panel de Recaudaciones lo ve.
+      const pago = await registrarPagoSimulado(client, { moduloSlug: MODULO, refId: fila.id, identificador: fila.numero, importeCentavos: importe, datos: { tipo: fila.tipo } });
+      await client.query('update pagos.fito_solicitudes set orden_id = $2 where id = $1', [fila.id, pago.ordenId]);
       return emitirCertificado(client, { ...fila, estado: 'pagada' }, { actor: 'sistema' });
     });
     await avisar({
