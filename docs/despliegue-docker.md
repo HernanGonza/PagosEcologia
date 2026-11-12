@@ -56,6 +56,21 @@ y los sirve en `GET /pagos/api/mail`; la pantalla `/pagos/mail/` se refresca sol
 y muestra el mail como lo vería la persona. Sigue saliendo también por el log del contenedor (`docker compose logs -f api`).
 `MAIL_PANEL_CLAVE` (opcional, en el `.env`) hace que la pantalla pida una clave.
 
+## Limpieza de datos de prueba (antes de producción)
+Script: `db/limpieza/limpiar-datos-de-prueba.sql` (no es una migración: `npm run migrate` no lo corre). Se pega entero en el SQL editor de
+Ecodatos con el rol `postgres`. **Por defecto termina en `ROLLBACK`**: no borra nada y muestra una tabla «antes → después» para revisar;
+para borrar de verdad se cambia la última línea a `commit;`. Es una sola transacción (si falla, no se borra nada).
+- Borra: solicitudes y todo lo que cuelga (documentos, observaciones, historial, enlaces, sesiones, avisos), códigos de mail, órdenes de
+  pago / pagos / comprobantes, y titulares, vínculos, objetos y certificados de los tres módulos. Reinicia la numeración.
+- Conserva: `pagos.modulos` (config), `pagos.tarifas`, `pagos.sistema_config`, `pagos.auditoria`, `pagos._migraciones`, los catálogos
+  (`cons_tipos`, `res_tipos`, `tipos_fito_domi`) y las filas de `fitosanitarios_domisanitarios` que cargó Ecodatos (`titular_id` nulo).
+- **No borra los archivos**: vaciar a mano los buckets `fitosanitarios`, `consultores` y `reservas` desde Studio (`/studio/`).
+- Hacer backup antes (el comando `pg_dump` está en el encabezado del script).
+- Los certificados tienen un trigger que impide borrarlos: el script lo desactiva solo dentro de la transacción.
+- Probado en la base local: el ensayo (`rollback`) no toca datos ni numeración, y el borrado real (`commit`) funcionó en una copia.
+  Las secuencias se reinician con `ALTER SEQUENCE … RESTART`, que se deshace con el rollback; `setval()` NO se deshace.
+- Si en producción se agrega una tabla nueva a un módulo, sumarla a este script.
+
 ## Ojo
 - **Modo prueba = inseguro**: cualquiera que llegue al server puede emitir certificados sin pagar y **leer los códigos de
   verificación y enlaces de acceso de todos los mails** (o sea, entrar a cualquier solicitud). Solo datos de prueba; usar

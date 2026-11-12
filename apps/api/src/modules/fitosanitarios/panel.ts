@@ -91,8 +91,8 @@ panelRouter.get('/solicitudes', lectura, async (req, res, next) => {
       const p = `$${valores.length}`;
       condiciones.push(`(lower(s.numero) like ${p} or lower(s.email) like ${p} or lower(s.datos->>'titular') like ${p} or s.datos->>'identificador' like ${p})`);
     }
-    const limite = Math.min(Number(req.query.limite) || 50, 200);
-    const desde = Math.max(Number(req.query.desde_fila) || 0, 0);
+    const limite = Math.min(Math.max(Math.floor(Number(req.query.limite)) || 50, 1), 200);
+    const desde = Math.min(Math.max(Math.floor(Number(req.query.desde_fila)) || 0, 0), 1_000_000);
     const where = condiciones.join(' and ');
 
     const config = await configModulo();

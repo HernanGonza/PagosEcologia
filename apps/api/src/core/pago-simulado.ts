@@ -5,6 +5,7 @@
  * Con la pasarela real esto lo hace el webhook confirmado: este archivo se borra junto con el botón simulado.
  */
 import { randomUUID } from 'node:crypto';
+import type { Request } from 'express';
 import type { PoolClient } from 'pg';
 
 export interface PagoSimuladoEntrada {
@@ -36,4 +37,16 @@ export async function registrarPagoSimulado(client: PoolClient, p: PagoSimuladoE
     [ordenId, Number(pg[0].id), comprobante, randomUUID()],
   );
   return { ordenId, comprobante };
+}
+
+/**
+ * ¿El pedido llegó directo a la API, desde esta misma máquina (curl a localhost:3001)? Detrás del proxy
+ * (nginx/HAProxy) siempre trae X-Forwarded-For y el socket no es loopback, así que da false.
+ * Las rutas de emisión de desarrollo (`/dev/emitir/<número>`) lo exigen: no llevan sesión y bastaría
+ * conocer el número de una solicitud aprobada para emitirle el certificado.
+ */
+export function esPedidoLocal(req: Request): boolean {
+  if (req.get('x-forwarded-for') || req.get('forwarded')) return false;
+  const ip = req.socket.remoteAddress ?? '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }

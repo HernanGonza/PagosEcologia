@@ -424,8 +424,8 @@ publicoRouter.put('/solicitud/datos', conSesion, async (req, res, next) => {
  */
 publicoRouter.put(
   '/solicitud/documentos/:requisito',
+  conSesion, // primero la sesión: no se recibe un archivo de 10 MB de quien no entró
   express.raw({ type: () => true, limit: maxBytesDocumento }),
-  conSesion,
   async (req, res, next) => {
     try {
       const s = solicitudDe(res);

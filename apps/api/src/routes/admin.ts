@@ -185,6 +185,12 @@ adminRouter.get('/ordenes', async (req, res, next) => {
     };
 
     const { estado, modulo, q, desde, hasta } = req.query as Record<string, string | undefined>;
+    for (const f of [desde, hasta]) {
+      if (f && !/^\d{4}-\d{2}-\d{2}$/.test(f)) {
+        res.status(400).json({ error: 'Las fechas tienen que tener el formato AAAA-MM-DD.' });
+        return;
+      }
+    }
     if (estado) agregar('o.estado = ?', estado);
     if (modulo) agregar('o.modulo_slug = ?', modulo);
     if (desde) agregar(`(o.created_at at time zone '${TZ}')::date >= ?`, desde);
@@ -197,8 +203,8 @@ adminRouter.get('/ordenes', async (req, res, next) => {
       filtros.push(`(o.identificador like $${n - 2} or c.numero ilike $${n - 1} or o.id::text = $${n})`);
     }
     const where = filtros.length ? `where ${filtros.join(' and ')}` : '';
-    const limite = Math.min(Number(req.query.limite) || 50, 200);
-    const desplazamiento = Math.max(Number(req.query.desde_fila) || 0, 0);
+    const limite = Math.min(Math.max(Math.floor(Number(req.query.limite)) || 50, 1), 200);
+    const desplazamiento = Math.min(Math.max(Math.floor(Number(req.query.desde_fila)) || 0, 0), 1_000_000);
 
     const [filas, total] = await Promise.all([
       pool.query<FilaOrden>(

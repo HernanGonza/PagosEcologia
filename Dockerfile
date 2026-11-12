@@ -58,5 +58,6 @@ COPY --from=build /app/apps/web/dist      /usr/share/nginx/html/pagos/publico
 COPY --from=build /app/apps/admin/dist    /usr/share/nginx/html/pagos/recaudaciones
 COPY --from=build /app/apps/paneles/dist  /usr/share/nginx/html/pagos/tecnicos
 COPY --from=build /app/apps/sistema/dist  /usr/share/nginx/html/pagos/administracion
+COPY docker/404.html docker/50x.html /usr/share/nginx/html/pagos/
 COPY docker/mail/index.html /usr/share/nginx/html/pagos/mail/index.html
 EXPOSE 80

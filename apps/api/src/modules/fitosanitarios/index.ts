@@ -8,6 +8,7 @@ import { personaRouter } from './persona.js';
 import { emitirCertificado, verificarPorCodigo } from './certificados.js';
 import { MODULO, ErrorSolicitud, bloquear, cambiarEstado, enTransaccion } from './solicitudes.js';
 import { registrarPendientes } from '../../routes/paneles.js';
+import { esPedidoLocal } from '../../core/pago-simulado.js';
 
 export const fitosanitariosRouter = Router();
 
@@ -53,6 +54,7 @@ if (process.env.EMISION_SIMULADA === '1') {
   if (process.env.NODE_ENV === 'production') throw new Error('EMISION_SIMULADA no puede estar activa en producción.');
   fitosanitariosRouter.post('/dev/emitir/:numero', async (req, res, next) => {
     try {
+      if (!esPedidoLocal(req)) throw new ErrorSolicitud(404, 'No existe.'); // solo desde esta máquina (ver core/pago-simulado.ts)
       const { rows } = await pool.query<{ id: string }>('select id from pagos.fito_solicitudes where numero = $1', [String(req.params.numero)]);
       if (!rows[0]) throw new ErrorSolicitud(404, 'La solicitud no existe.');
       const c = await enTransaccion(async (client) => {

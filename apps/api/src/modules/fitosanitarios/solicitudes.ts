@@ -356,6 +356,7 @@ export async function solicitudPorId(id: string): Promise<FilaSolicitud | null> 
 
 /** Bloquea la fila para cambiar su estado dentro de una transacción. */
 export async function bloquear(client: PoolClient, id: string): Promise<FilaSolicitud> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ErrorSolicitud(404, 'La solicitud no existe.');
   const { rows } = await client.query<FilaSolicitud>(`select ${columnas} from pagos.fito_solicitudes where id = $1 for update`, [id]);
   if (!rows[0]) throw new ErrorSolicitud(404, 'La solicitud no existe.');
   return rows[0];

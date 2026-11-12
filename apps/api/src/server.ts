@@ -30,6 +30,8 @@ if (process.env.NODE_ENV === 'production') {
 await exigirMigraciones();
 
 const app = express();
+// No delatar con qué está hecho el servidor.
+app.disable('x-powered-by');
 // Detrás del proxy (nginx/caddy) la IP real llega en X-Forwarded-For; se usa para los topes anti-abuso.
 // TRUST_PROXY=<cantidad de proxies> (ej. 1 si hay uno solo, como HAProxy) es lo más estricto; por defecto (solo desarrollo) confía en proxies de red privada.
 const proxy = process.env.TRUST_PROXY?.trim();
@@ -63,7 +65,22 @@ if (storageLocalDir()) {
   });
 }
 
+// Rutas que no existen: JSON en vez de la página "Cannot GET …" de Express.
+app.use((_req, res) => {
+  res.status(404).json({ error: 'No encontramos lo que buscás.' });
+});
+
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const tipo = (error as { type?: string }).type;
+  // Errores del pedido (no del servidor): un JSON mal formado o demasiado grande no es un 500.
+  if (tipo === 'entity.parse.failed') {
+    res.status(400).json({ error: 'El pedido no es válido.' });
+    return;
+  }
+  if (tipo === 'entity.too.large') {
+    res.status(413).json({ error: 'El pedido es demasiado grande.' });
+    return;
+  }
   console.error(error);
   res.status(500).json({ error: 'Ocurrió un error inesperado.' });
 });

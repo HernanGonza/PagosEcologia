@@ -2,6 +2,7 @@ import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Home from './pages/Home';
+import NoEncontrada from './pages/NoEncontrada';
 import { SoloSiActivo } from './lib/modulos-activos';
 import './index.css';
 
@@ -46,6 +47,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/pagar/reservas/verificar/:codigo" element={<ReservasVerificar />} />
           {/* Enlaces del formato anterior (token en la ruta): ya no valen. */}
           <Route path="/pagar/reservas/solicitud/:token" element={<Navigate to="/pagar/reservas?enlace=vencido" replace />} />
+          {/* Cualquier otra dirección: página 404 (no queda en blanco). */}
+          <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </Suspense>
     </BrowserRouter>
