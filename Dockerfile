@@ -31,7 +31,7 @@ RUN mkdir -p /data/mail && chown node:node /data/mail
 USER node
 EXPOSE 3001
 WORKDIR /app/apps/api
-CMD ["node_modules/.bin/tsx", "src/server.ts"]
+CMD ["/app/node_modules/.bin/tsx", "src/server.ts"]
 
 # ---------- Fronts ----------
 FROM deps AS build
