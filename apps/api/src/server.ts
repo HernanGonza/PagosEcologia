@@ -8,7 +8,8 @@ import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
 import { consultoresRouter } from './modules/consultores/index.js';
 import { reservasRouter } from './modules/reservas/index.js';
 import { descargarArchivo, storageLocalDir } from './core/storage.js';
-import { exigirCorreoReal } from './core/correo.js';
+import { correoEnConsola, exigirCorreoReal } from './core/correo.js';
+import { buzonRouter } from './core/buzon-correo.js';
 import { exigirSecretoDeCodigos } from './core/verificacion.js';
 import { moduloActivo } from './core/modulo-activo.js';
 import { exigirMigraciones } from './core/migraciones.js';
@@ -39,6 +40,8 @@ app.use(cors(process.env.NODE_ENV === 'production' ? { origin: origenes } : unde
 app.use(express.json({ limit: '200kb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// Buzón de demostración: solo existe si los mails no se envían (MAIL_PROVIDER=consola, nunca en producción).
+if (correoEnConsola()) app.use('/api/mail', buzonRouter);
 app.use('/api/modulos', modulosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/paneles', panelesRouter);

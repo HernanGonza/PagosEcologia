@@ -56,7 +56,7 @@ function CambiarValor({ modulo, concepto, alGuardar }: { modulo: string; concept
     setGuardando(true);
     setError('');
     try {
-      const res = await fetchAutenticado('/api/admin/tarifas', {
+      const res = await fetchAutenticado(`${import.meta.env.VITE_API_BASE ?? '/api'}/admin/tarifas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ moduloSlug: modulo, concepto, importePesos: Number(importe.replace(',', '.')), vigenteDesde: desde }),

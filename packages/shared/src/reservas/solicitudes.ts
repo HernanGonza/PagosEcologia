@@ -202,6 +202,8 @@ export interface SolicitudPublica {
   tipoSolicitud: 'alta' | 'renovacion';
   /** Certificado que renueva (solo renovaciones). */
   renuevaCertificadoId: string | null;
+  /** Certificado emitido por esta solicitud (null hasta que se paga). */
+  certificadoId: string | null;
   enviadaEn: string | null;
   aprobacionVence: string | null;
   motivoRechazo: string | null;

@@ -56,7 +56,7 @@ export function SesionProvider({ children }: { children: ReactNode }) {
   const cargar = useCallback(async (sesion: Session | null) => {
     if (!sesion) return setEstado({ tipo: 'sin-sesion' });
     try {
-      const res = await fetchAutenticado('/api/admin/yo');
+      const res = await fetchAutenticado(`${import.meta.env.VITE_API_BASE ?? '/api'}/admin/yo`);
       if (res.status === 401) {
         await supabase?.auth.signOut();
         return setEstado({ tipo: 'sin-sesion' });

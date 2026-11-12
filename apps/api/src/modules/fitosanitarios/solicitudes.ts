@@ -449,6 +449,7 @@ export async function solicitudPublica(s: FilaSolicitud): Promise<SolicitudPubli
     puedeEditar: estadosEditables.includes(s.estado),
     tipoSolicitud: s.tipo_solicitud,
     renuevaCertificadoId: s.renueva_certificado_id,
+    certificadoId: s.certificado_id,
     enviadaEn: s.enviada_en?.toISOString() ?? null,
     aprobacionVence: s.aprobacion_vence,
     motivoRechazo: s.motivo_rechazo,

@@ -1,6 +1,6 @@
 # Dos imágenes desde el mismo repo:
 #   target "api"  -> la API (Express, corre con tsx; lee db/migrations al arrancar)
-#   target "web"  -> nginx con los 4 fronts compilados + proxy de /api a la API
+#   target "web"  -> nginx con los 4 fronts + la bandeja de mails, colgados de /pagos/, y el proxy de /pagos/api a la API
 #
 # Los VITE_* se "queman" en el JavaScript al compilar: se pasan como build args (ver docker-compose.yml).
 
@@ -26,6 +26,8 @@ COPY package.json ./
 COPY apps/api ./apps/api
 COPY packages ./packages
 COPY db/migrations ./db/migrations
+# Carpeta del buzón de mails de prueba (volumen): tiene que ser escribible por el usuario node.
+RUN mkdir -p /data/mail && chown node:node /data/mail
 USER node
 EXPOSE 3001
 WORKDIR /app/apps/api
@@ -35,20 +37,26 @@ CMD ["node_modules/.bin/tsx", "src/server.ts"]
 FROM deps AS build
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+# Prefijo de la API que usan los fronts y pago simulado (1 = muestra el botón de pago de demostración).
+ARG VITE_API_BASE=/pagos/api
+ARG VITE_PAGO_SIMULADO=0
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
+    VITE_API_BASE=$VITE_API_BASE VITE_PAGO_SIMULADO=$VITE_PAGO_SIMULADO
 COPY apps ./apps
 COPY packages ./packages
 COPY tsconfig.base.json ./
-# El público cuelga de "/" y los demás de su ruta. Con dominio propio por app se puede pasar VITE_BASE=/ a todos.
-RUN VITE_BASE=/          npm run build -w @botonera/web \
- && VITE_BASE=/admin/    npm run build -w @botonera/admin \
- && VITE_BASE=/paneles/  npm run build -w @botonera/paneles \
- && VITE_BASE=/sistema/  npm run build -w @botonera/sistema
+# Cada front cuelga de su ruta bajo /pagos/ (dominio de ecodatos).
+RUN VITE_BASE=/pagos/publico/         npm run build -w @botonera/web \
+ && VITE_BASE=/pagos/recaudaciones/   npm run build -w @botonera/admin \
+ && VITE_BASE=/pagos/tecnicos/        npm run build -w @botonera/paneles \
+ && VITE_BASE=/pagos/administracion/  npm run build -w @botonera/sistema
 
 FROM nginx:1.27-alpine AS web
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/apps/web/dist      /usr/share/nginx/html
-COPY --from=build /app/apps/admin/dist    /usr/share/nginx/html/admin
-COPY --from=build /app/apps/paneles/dist  /usr/share/nginx/html/paneles
-COPY --from=build /app/apps/sistema/dist  /usr/share/nginx/html/sistema
+COPY docker/seguridad.conf /etc/nginx/snippets/seguridad.conf
+COPY --from=build /app/apps/web/dist      /usr/share/nginx/html/pagos/publico
+COPY --from=build /app/apps/admin/dist    /usr/share/nginx/html/pagos/recaudaciones
+COPY --from=build /app/apps/paneles/dist  /usr/share/nginx/html/pagos/tecnicos
+COPY --from=build /app/apps/sistema/dist  /usr/share/nginx/html/pagos/administracion
+COPY docker/mail/index.html /usr/share/nginx/html/pagos/mail/index.html
 EXPOSE 80

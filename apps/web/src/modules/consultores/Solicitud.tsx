@@ -10,6 +10,7 @@ import { FloatingInput } from '@/components/watermelon/floating-input';
 import { cn } from '@/lib/utils';
 import { api, fecha, fechaHora, fijarSolicitud, pesos } from './api';
 import { Aviso, Pagina, Pasos, Tarjeta } from './comunes';
+import { BotonCertificado, BotonPagoSimulado, pagoSimuladoHabilitado } from './PagoSimulado';
 import { consultores as c } from '@botonera/shared';
 const { etiquetasEstado, formatosDocumento, exigeElPoder, maxBytesDocumento } = c;
 type EstadoSolicitud = c.EstadoSolicitud;
@@ -457,10 +458,16 @@ export default function Solicitud() {
                 )}
                 {s.aprobacionVence && <p className="text-sm">La aprobación vale hasta el {fecha(s.aprobacionVence)}.</p>}
                 <div className="mt-2">
-                  <Button size="lg" className="rounded-lg" disabled>
-                    Pagar la tasa
-                  </Button>
-                  <p className="mt-2 text-sm">El pago en línea se habilita con la integración de MacroClick.</p>
+                  {pagoSimuladoHabilitado ? (
+                    <BotonPagoSimulado onPagada={setSolicitud} />
+                  ) : (
+                    <>
+                      <Button size="lg" className="rounded-lg" disabled>
+                        Pagar la tasa
+                      </Button>
+                      <p className="mt-2 text-sm">El pago en línea se habilita con la integración de MacroClick.</p>
+                    </>
+                  )}
                 </div>
               </Estado>
             )}
@@ -484,6 +491,7 @@ export default function Solicitud() {
             {(s.estado === 'pagada' || s.estado === 'emitida') && (
               <Estado icono={<Check className="size-6" />} tono="bg-ok/12 text-ok" titulo={s.estado === 'pagada' ? 'Pago recibido' : 'Certificado emitido'}>
                 <p>Te enviamos el detalle por mail.</p>
+                {s.certificadoId && <BotonCertificado />}
               </Estado>
             )}
           </Tarjeta>

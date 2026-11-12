@@ -31,7 +31,7 @@ export async function abrirPdf(ruta: string): Promise<void> {
   const ventana = window.open('', '_blank');
   try {
     const token = await tokenActual();
-    const res = await fetch(`/api${ruta}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    const res = await fetch(`${import.meta.env.VITE_API_BASE ?? '/api'}${ruta}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) throw new ErrorApi(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'No se pudo abrir el archivo.');
     const url = URL.createObjectURL(await res.blob());
     if (ventana) ventana.location.href = url;
@@ -54,7 +54,7 @@ export async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<
   const token = await tokenActual();
   let res: Response;
   try {
-    res = await fetch(`/api${ruta}`, {
+    res = await fetch(`${import.meta.env.VITE_API_BASE ?? '/api'}${ruta}`, {
       ...opciones,
       headers: {
         ...(opciones.body ? { 'Content-Type': 'application/json' } : {}),

@@ -12,7 +12,7 @@ export function useApi<T>(ruta: string) {
     const control = new AbortController();
     setCargando(true);
     setError(null);
-    fetchAutenticado(`/api/admin${ruta}`, { signal: control.signal })
+    fetchAutenticado(`${import.meta.env.VITE_API_BASE ?? '/api'}/admin${ruta}`, { signal: control.signal })
       .then(async (res) => {
         const cuerpo = await res.json().catch(() => null);
         if (!res.ok) throw new Error(cuerpo?.error ?? `Error ${res.status}`);

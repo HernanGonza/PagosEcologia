@@ -1,15 +1,28 @@
 # MODO PRUEBA (hasta que exista la pasarela de pagos). Se suma al compose principal:
-#   docker compose -f docker-compose.yml -f docker-compose.prueba.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.prueba.yml [-f docker-compose.ecodatos.yml] up -d --build
 #
 # Qué cambia: la API NO corre con NODE_ENV=production, así que no aplica las guardas de producción
 #   - PAYMENT_PROVIDER=mock (en producción exige macroclick)
-#   - EMISION_SIMULADA=1: POST /api/<modulo>/dev/emitir/<numero> emite el certificado de una solicitud aprobada sin pago
+#   - EMISION_SIMULADA=1: habilita el botón "Pagar (simulado)" del solicitante y POST /api/<modulo>/dev/emitir/<numero>
+#   - MAIL_PROVIDER=consola: los mails no se envían; quedan en la bandeja /pagos/mail/ (y en el log del contenedor)
 #   - CORS abierto
-# Por eso: solo para pruebas internas y sin datos reales. Cualquiera que llegue al server puede emitir certificados.
-# Para pasar a real: levantar solo con docker-compose.yml, PAYMENT_PROVIDER=macroclick y sin EMISION_SIMULADA.
+# Por eso: solo para pruebas internas y sin datos reales. Cualquiera que llegue al server puede emitir certificados
+# y leer los códigos de verificación de la bandeja (poner MAIL_PANEL_CLAVE en el .env para pedir una clave).
+# Para pasar a real: levantar solo con docker-compose.yml (+ecodatos), PAYMENT_PROVIDER=macroclick, mail real y sin EMISION_SIMULADA.
 services:
   api:
     environment:
       NODE_ENV: staging
       PAYMENT_PROVIDER: mock
       EMISION_SIMULADA: "1"
+      MAIL_PROVIDER: consola
+      MAIL_BUZON_ARCHIVO: /data/mail/mails.jsonl
+    volumes:
+      - mail_buzon:/data/mail
+  web:
+    build:
+      args:
+        VITE_PAGO_SIMULADO: "1"
+
+volumes:
+  mail_buzon:

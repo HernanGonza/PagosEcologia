@@ -9,6 +9,7 @@ import { pool } from '../../db.js';
 import { descargarArchivo, subirArchivo, tipoPorContenido } from '../../core/storage.js';
 import { emailCanonico, emailValido, normalizarEmail, pedirCodigo, verificarCodigo } from '../../core/verificacion.js';
 import { renovacionSinCambios } from './renovaciones.js';
+import { emitirCertificado, pdfDeCertificado, urlVerificacion } from './certificados.js';
 import { esRepresentante } from './titulares.js';
 import {
   BUCKET,
@@ -570,6 +571,52 @@ publicoRouter.post('/solicitud/enviar', conSesion, async (_req, res, next) => {
           ],
     });
     res.json(await solicitudPublica({ ...s, estado: sinRevision ? 'aprobada' : 'enviada' }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+// --- Pago SIMULADO (demostración) ---------------------------------------------------------------------------
+// Solo con EMISION_SIMULADA=1 y fuera de producción: reemplaza al checkout de la pasarela para mostrar el circuito
+// completo (aprobada → pago → certificado emitido). Con pasarela real estas rutas no existen.
+const pagoSimulado = process.env.EMISION_SIMULADA === '1' && process.env.NODE_ENV !== 'production';
+
+publicoRouter.post('/solicitud/pagar-simulado', conSesion, async (_req, res, next) => {
+  try {
+    if (!pagoSimulado) throw new ErrorSolicitud(404, 'El pago simulado no está habilitado.');
+    const s = solicitudDe(res);
+    const c = await enTransaccion(async (client) => {
+      const fila = await bloquear(client, s.id);
+      if (fila.estado !== 'aprobada') throw new ErrorSolicitud(409, 'La solicitud tiene que estar aprobada para poder pagarla.');
+      await cambiarEstado(client, fila, 'pagada', { actor: 'solicitante', nota: 'Pago simulado (demostración).' });
+      return emitirCertificado(client, { ...fila, estado: 'pagada' }, { actor: 'sistema' });
+    });
+    await avisar({
+      para: s.email,
+      asunto: `Solicitud ${s.numero}: pago recibido y certificado emitido`,
+      titulo: 'Recibimos tu pago',
+      parrafos: [
+        `Tu solicitud ${s.numero} está paga y el certificado ${c.numero} ya fue emitido (vigente hasta el ${c.venceEn.split('-').reverse().join('/')}).`,
+        'Podés descargarlo volviendo a entrar con tu mail a "Mis certificados". El PDF lleva un código QR para verificar que es auténtico.',
+      ],
+      boton: { texto: 'Verificar el certificado', url: urlVerificacion(c.codigoVerificacion) },
+    });
+    res.json({ ok: true, certificadoId: c.id, numero: c.numero });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** PDF del certificado de la solicitud que se está viendo (con su sesión). */
+publicoRouter.get('/solicitud/certificado/pdf', conSesion, async (_req, res, next) => {
+  try {
+    const s = solicitudDe(res);
+    const r = s.certificado_id ? await pdfDeCertificado(s.certificado_id) : null;
+    if (!r) throw new ErrorSolicitud(404, 'Esta solicitud todavía no tiene certificado.');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${r.numero}.pdf"`);
+    res.send(r.pdf);
   } catch (e) {
     next(e);
   }

@@ -1,6 +1,10 @@
-# Producción sobre la IP del servidor (sin dominio): todo entra por el puerto 80.
+# Despliegue en el dominio de ecodatos, bajo /pagos/ (ver docs/despliegue-docker.md):
 #   docker compose up -d --build
+# Con el .env del servidor trae COMPOSE_FILE=docker-compose.yml:docker-compose.prueba.yml:docker-compose.ecodatos.yml
+# (mismo mecanismo que la wiki). Este archivo solo no publica ningún puerto: la entrada es el nginx de ecodatos.
 # La base y el Storage son los de Ecodatos (Supabase self-hosted): el servidor tiene que llegar a DATABASE_URL.
+name: pagos-ecodatos
+
 services:
   api:
     build:
@@ -11,7 +15,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
-      TRUST_PROXY: "1"      # hay un solo proxy delante: el nginx de abajo
+      # Cadena de proxies delante de la API: HAProxy -> nginx de ecodatos -> nginx de pagos. Verificar en el server.
+      TRUST_PROXY: ${TRUST_PROXY:-3}
     expose:
       - "3001"
     healthcheck:
@@ -32,5 +37,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    ports:
-      - "80:80"

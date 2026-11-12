@@ -34,7 +34,7 @@ function actualizar(c: CatalogoResponse) {
 }
 
 function consultar() {
-  fetch('/api/modulos')
+  fetch(`${import.meta.env.VITE_API_BASE ?? '/api'}/modulos`)
     .then((r) => (r.ok ? (r.json() as Promise<CatalogoResponse>) : Promise.reject(new Error(String(r.status)))))
     .then(actualizar)
     // Si la API no responde no se esconde nada: cada pantalla ya maneja sus propios errores.

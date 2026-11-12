@@ -16,7 +16,7 @@ export interface SolicitudExistente {
   actualizadaEn: string;
 }
 
-const BASE = '/api/reservas';
+const BASE = `${import.meta.env.VITE_API_BASE ?? '/api'}/reservas`;
 
 export class ErrorApi extends Error {
   constructor(public status: number, mensaje: string, public detalle: Record<string, unknown> = {}) {
@@ -46,7 +46,7 @@ async function pedir<T>(ruta: string, opciones: RequestInit = {}, { redirigir = 
   if (json.codigo === 'enlace_invalido' && redirigir) {
     // La sesión venció o el enlace ya no vale (usado, vencido o reemplazado): a la página donde se pide otro.
     const usado = json.motivo === 'usado' && json.usadoEn;
-    window.location.replace(`/pagar/reservas?enlace=${usado ? `usado&cuando=${encodeURIComponent(json.usadoEn)}` : 'vencido'}`);
+    window.location.replace(`${import.meta.env.BASE_URL}pagar/reservas?enlace=${usado ? `usado&cuando=${encodeURIComponent(json.usadoEn)}` : 'vencido'}`);
     return new Promise<T>(() => {});
   }
   if (!res.ok) throw new ErrorApi(res.status, json.error ?? 'Ocurrió un error. Intentá de nuevo.', json);
@@ -85,6 +85,25 @@ export const api = {
     pedir<SolicitudPublica>(`/solicitud/documentos/${encodeURIComponent(requisito)}/vencimiento`, { ...json({ venceEn }), method: 'PUT' }),
   urlDocumento: (id: number) => `${BASE}/solicitud/documentos/${id}`,
   enviar: () => pedir<SolicitudPublica>('/solicitud/enviar', { method: 'POST' }),
+  pagarSimulado: () => pedir<{ ok: true; certificadoId: string; numero: string }>('/solicitud/pagar-simulado', { method: 'POST' }),
+  /** Abre el PDF del certificado en otra pestaña (se pide con fetch para que viaje la sesión y el número). */
+  abrirCertificado: async () => {
+    const ventana = window.open('', '_blank'); // se abre en el clic: si no, el navegador bloquea la pestaña
+    try {
+      const res = await fetch(`${BASE}/solicitud/certificado/pdf`, {
+        credentials: 'same-origin',
+        headers: solicitudActual ? { 'X-Solicitud': solicitudActual } : {},
+      });
+      if (!res.ok) throw new ErrorApi(res.status, ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'No se pudo abrir el certificado.');
+      const url = URL.createObjectURL(await res.blob());
+      if (ventana) ventana.location.href = url;
+      else window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+    } catch (e) {
+      ventana?.close();
+      throw e;
+    }
+  },
 };
 
 // --- Tablero de la persona ("Mis certificados") ---------------------------------------------------

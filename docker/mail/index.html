@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandeja de mails de prueba</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233e6c51' stroke-width='2'%3E%3Crect x='2' y='4' width='20' height='16' rx='2'/%3E%3Cpath d='m22 7-10 6L2 7'/%3E%3C/svg%3E">
+<style>
+  :root { --bg:#faf4eb; --card:#fff; --ink:#21130d; --muted:#6b6152; --line:#e4dac6; --verde:#3e6c51; --verde-osc:#2f5540; --sel:#eaf2ec; --aviso:#8a5a00; --aviso-bg:#fff4d6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17120e; --card:#211a14; --ink:#f3ece0; --muted:#a79c88; --line:#3a2f25; --verde:#7fb596; --verde-osc:#9fd0b4; --sel:#25352b; --aviso:#f1c66a; --aviso-bg:#3a2d10; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background:#2f5540; color:#fff; padding:14px 20px; display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; }
+  header h1 { margin:0; font-size:17px; font-weight:600; flex:1 1 auto; }
+  header small { opacity:.85; }
+  button { font:inherit; cursor:pointer; border:1px solid rgba(255,255,255,.5); background:transparent; color:#fff; padding:6px 12px; border-radius:8px; }
+  button:hover { background:rgba(255,255,255,.12); }
+  .aviso { background:var(--aviso-bg); color:var(--aviso); padding:8px 20px; font-size:13px; border-bottom:1px solid var(--line); }
+  main { display:grid; grid-template-columns:minmax(260px,360px) 1fr; height:calc(100vh - 100px); min-height:420px; }
+  #lista { overflow:auto; border-right:1px solid var(--line); background:var(--card); }
+  .item { padding:12px 16px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .item:hover { background:var(--sel); }
+  .item.sel { background:var(--sel); box-shadow:inset 3px 0 0 var(--verde); }
+  .item .para { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .asunto { color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .hora { color:var(--muted); font-size:12px; }
+  .item.nuevo .para::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--verde); margin-right:6px; }
+  #detalle { overflow:auto; padding:20px 24px; }
+  #detalle h2 { margin:0 0 4px; font-size:20px; }
+  .meta { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .codigo { display:inline-block; font:600 28px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing:.18em; background:var(--sel); color:var(--verde-osc); padding:12px 18px; border-radius:12px; margin:0 0 16px; }
+  .tabs { display:flex; gap:6px; margin:0 0 10px; }
+  .tabs button { border-color:var(--line); color:var(--ink); }
+  .tabs button.on { background:var(--verde); color:#fff; border-color:var(--verde); }
+  iframe { width:100%; height:560px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  pre { white-space:pre-wrap; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin:0; font:13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  .vacio { color:var(--muted); padding:40px 20px; text-align:center; }
+  @media (max-width: 760px) { main { grid-template-columns:1fr; height:auto; } #lista { max-height:240px; border-right:0; border-bottom:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bandeja de mails de prueba</h1>
+  <small id="estado">Conectando…</small>
+  <button id="limpiar" type="button">Vaciar bandeja</button>
+</header>
+<div class="aviso">Entorno de prueba: acá aparecen los mails que el sistema <strong>no envía</strong> (códigos de verificación, enlaces y avisos). No usar con datos reales.</div>
+<main>
+  <section id="lista" aria-label="Mails recibidos"></section>
+  <section id="detalle"><div class="vacio">Todavía no llegó ningún mail. Cuando alguien pida un código o avance un trámite, aparece acá.</div></section>
+</main>
+<script>
+(function () {
+  var API = new URL('../api/mail', location.href).pathname;
+  var mails = [], ultimo = 0, elegido = null, vistaTexto = false, nuevos = {};
+  var clave = '';
+  try { clave = sessionStorage.getItem('mail-clave') || ''; } catch (e) {}
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+  function hora(iso) { return new Date(iso).toLocaleString('es-AR', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+  function pedir(metodo, query) {
+    return fetch(API + (query || ''), { method: metodo, headers: clave ? { 'X-Mail-Clave': clave } : {}, cache: 'no-store' });
+  }
+
+  function dibujarLista() {
+    var l = $('lista');
+    if (!mails.length) { l.innerHTML = '<div class="vacio">Sin mails.</div>'; return; }
+    l.innerHTML = mails.map(function (m) {
+      return '<div class="item' + (m.id === elegido ? ' sel' : '') + (nuevos[m.id] ? ' nuevo' : '') + '" data-id="' + m.id + '">' +
+        '<div class="para">' + esc(m.para) + '</div><div class="asunto">' + esc(m.asunto) + '</div><div class="hora">' + hora(m.fecha) + '</div></div>';
+    }).join('');
+  }
+
+  function dibujarDetalle() {
+    var m = mails.filter(function (x) { return x.id === elegido; })[0];
+    var d = $('detalle');
+    if (!m) { d.innerHTML = '<div class="vacio">Elegí un mail de la lista.</div>'; return; }
+    // El código de verificación (6 dígitos) va destacado: es lo que hay que copiar para seguir el trámite.
+    var cod = /c[oó]digo/i.test(m.asunto) ? /(?:^|\D)(\d{6})(?:\D|$)/.exec(m.texto) : null;
+    d.innerHTML = '<h2>' + esc(m.asunto) + '</h2><div class="meta">Para: <strong>' + esc(m.para) + '</strong> · ' + hora(m.fecha) + '</div>' +
+      (cod ? '<div class="codigo" title="Código de verificación">' + cod[1] + '</div>' : '') +
+      '<div class="tabs"><button type="button" data-v="html" class="' + (vistaTexto ? '' : 'on') + '">Como lo ve la persona</button>' +
+      '<button type="button" data-v="texto" class="' + (vistaTexto ? 'on' : '') + '">Texto plano</button></div>' +
+      '<div id="cuerpo"></div>';
+    var c = $('cuerpo');
+    if (!vistaTexto && m.html) {
+      var f = document.createElement('iframe');
+      // Sin scripts; los enlaces se abren en otra pestaña (el mail de prueba apunta al sitio público del trámite).
+      f.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+      f.srcdoc = '<base target="_blank">' + m.html;
+      c.appendChild(f);
+    } else {
+      var p = document.createElement('pre');
+      p.textContent = m.texto;
+      c.appendChild(p);
+    }
+  }
+
+  function sinAcceso(msg) {
+    $('estado').textContent = msg;
+    var k = window.prompt('Clave de la bandeja:');
+    if (k) { clave = k; try { sessionStorage.setItem('mail-clave', k); } catch (e) {} }
+  }
+
+  function consultar() {
+    pedir('GET', '?desde=' + ultimo).then(function (r) {
+      if (r.status === 401) { sinAcceso('Falta la clave'); return null; }
+      if (r.status === 404) { $('estado').textContent = 'La bandeja no está habilitada en este servidor'; return null; }
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function (j) {
+      if (!j) return;
+      $('estado').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR') + ' · se refresca solo';
+      if (j.mails.length) {
+        j.mails.forEach(function (m) { if (ultimo) nuevos[m.id] = true; });
+        mails = j.mails.concat(mails);
+        ultimo = mails[0].id;
+        if (elegido === null || nuevos[mails[0].id]) { elegido = mails[0].id; vistaTexto = vistaTexto; }
+        dibujarLista(); dibujarDetalle();
+      }
+    }).catch(function () { $('estado').textContent = 'Sin conexión con el servidor, reintentando…'; });
+  }
+
+  $('lista').addEventListener('click', function (e) {
+    var el = e.target.closest('.item'); if (!el) return;
+    elegido = Number(el.dataset.id); delete nuevos[elegido];
+    dibujarLista(); dibujarDetalle();
+  });
+  $('detalle').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-v]'); if (!b) return;
+    vistaTexto = b.dataset.v === 'texto'; dibujarDetalle();
+  });
+  $('limpiar').addEventListener('click', function () {
+    if (!window.confirm('¿Vaciar la bandeja? Se borran todos los mails guardados.')) return;
+    pedir('DELETE').then(function () { mails = []; ultimo = 0; elegido = null; nuevos = {}; dibujarLista(); dibujarDetalle(); });
+  });
+
+  dibujarLista();
+  consultar();
+  setInterval(consultar, 3000);
+})();
+</script>
+</body>
+</html>

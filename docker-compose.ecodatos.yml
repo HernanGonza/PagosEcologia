@@ -1,0 +1,13 @@
+# Cuelga el sistema de pagos del nginx de ecodatos (rutas /pagos/... del mismo dominio), como la wiki y las claves.
+# El contenedor web se une a la red "supabase" con nombre fijo para que ese nginx lo encuentre.
+# Después hay que pegar docker/ecodatos-nginx-pagos.conf dentro del server { } del nginx de ecodatos.
+# Se activa con COMPOSE_FILE en el .env del servidor (ver docs/despliegue-docker.md).
+services:
+  web:
+    container_name: pagos-web
+    networks: [default, supabase]
+
+networks:
+  supabase:
+    name: supabase
+    external: true

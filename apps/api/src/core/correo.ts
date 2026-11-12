@@ -10,6 +10,7 @@
  * MAIL_FROM_NOMBRE es cómo se ve el remitente.
  */
 import nodemailer from 'nodemailer';
+import { guardarMail } from './buzon-correo.js';
 
 export interface Mail {
   para: string;
@@ -34,6 +35,8 @@ function via(): Via | null {
 }
 
 export const correoConfigurado = () => via() !== null;
+/** True si los mails no se envían sino que quedan en el buzón de demostración (MAIL_PROVIDER=consola). */
+export const correoEnConsola = () => via() === 'consola';
 
 /** Falla al arrancar en producción si el mail va a la consola (imprimiría códigos y enlaces en los logs). */
 export function exigirCorreoReal() {
@@ -106,6 +109,7 @@ async function enviarMicrosoft(m: Mail) {
 export async function enviarCorreo(m: Mail): Promise<void> {
   switch (via()) {
     case 'consola':
+      guardarMail(m);
       console.log(`\n✉️  [correo de desarrollo] Para: ${m.para}\n    Asunto: ${m.asunto}\n${m.texto.replace(/^/gm, '    ')}\n`);
       return;
     case 'gmail':

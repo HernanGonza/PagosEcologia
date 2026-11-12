@@ -33,7 +33,7 @@ export async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<
   const token = data.session?.access_token;
   let res: Response;
   try {
-    res = await fetch(`/api${ruta}`, {
+    res = await fetch(`${import.meta.env.VITE_API_BASE ?? '/api'}${ruta}`, {
       ...opciones,
       headers: {
         ...(opciones.body ? { 'Content-Type': 'application/json' } : {}),
