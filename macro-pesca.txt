@@ -1,0 +1,1899 @@
+===== app/Http/Controllers/WebhookController.php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Licence;
+use App\Models\Logo;
+use App\Models\Payment;
+use App\Models\Species;
+use App\Models\Transaction;
+use App\PDF\PDFController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use App\Models\User;
+use App\Notifications\LicenseEmail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
+
+class WebhookController extends Controller {
+
+    public function handlePaymentWebhook(Request $request)
+    {
+        Log::info('Webhook: '. time() .' - ' . $request->getContent());
+
+        $json_data = $request->getContent();
+        $array_data = json_decode($json_data, true);
+
+        $payment = Payment::where('id_transaction', $array_data['TransaccionComercioId'])
+            ->update([
+                'state' => $array_data['Estado'],
+                'type_transaction' => $array_data['Tipo'],
+                'json_data' => $json_data,
+            ]);
+
+        if($payment == null){
+            Transaction::create([
+                'id_transaction' => $array_data['TransaccionComercioId'],
+                'state' => $array_data['Estado'],
+                'type_transaction' => $array_data['Tipo'],
+                'json_data' => $json_data,
+            ]);
+        }
+
+        $id_licence = explode('_', $array_data['TransaccionComercioId'])[0];
+        $licencia = Licence::with('user')->where('id', $id_licence)->first();
+
+        if($array_data['Estado'] == 'REALIZADA'){
+
+            $user = User::where('email', $licencia->user->email)->first();
+            $pdfPath = $this->savePdf($array_data['TransaccionComercioId'], $licencia, $user);
+            $relativePath = Str::after($pdfPath, 'storage/app/public/');
+
+            Licence::where('id', $id_licence)->update([
+                'active' => true,
+                'pdf_path' => $relativePath,
+            ]);
+
+            $user->notify(new LicenseEmail($pdfPath));
+        }
+
+        return response()->json(['message' => 'OK']);
+    }
+
+    public function savePdf($paymentId, $licencia, $user) {
+        $lic = json_decode($licencia->json_data, true);
+
+        $pdf = new PDFController('L', 'mm', [54, 85.60], true, 'UTF-8', false);
+        $pdf->SetCreator('Ministerio de Ecologia');
+        $pdf->SetAuthor('Departamento de Pesca');
+        $pdf->SetTitle('Licencia de Pesca');
+        $pdf->SetMargins(10, 0, 10);
+        $pdf->setPrintHeader(true);
+        $pdf->setPrintFooter(false);
+        $pdf->SetAutoPageBreak(false, 0);
+        $pdf->AddPage();
+
+        $pdf->SetFont('DejaVuSans', '', 4, '', true);
+
+        $html = '<table border="0" cellpadding="0" cellspacing="0">
+            <tr>
+                <td>MINISTERIO DE ECOLOGÍA Y RNR</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px; padding:0px;">D.G. de Ecología y Calidad Amb.</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px;">Dirección de Biodiversidad</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px;">Departamento de Fauna</td>
+            </tr>
+        </table>';
+
+        $logoMnes = Logo::where('code', 'LOGO_PROV')->value('path_image');
+        $logoMnesExt = pathinfo($logoMnes, PATHINFO_EXTENSION);
+
+        $logoEco = Logo::where('code', 'LOGO_MINIS')->value('path_image');
+        $logoEcoExt = pathinfo($logoEco, PATHINFO_EXTENSION);
+
+        $pdf->writeHTMLCell('30', '10', 25, 1, $html, 0, 0, 0, true, 'C', false);
+        $pdf->Image(public_path('storage/'.$logoMnes), 5, 0, 20, 8, mb_strtoupper($logoMnesExt), '', '', true, 150, '', false, false, 0, false, false, false);
+
+        $pdf->Image(public_path('storage/'.$logoEco), 57, 0, 22, 8, mb_strtoupper($logoEcoExt), '', '', true, 150, '', false, false, 0, false, false, false);
+
+        $pdf->SetFont('DejaVuSans', '', 9, '', true);
+        $pdf->SetDrawColor(0, 0, 0);
+        //$pdf->Rect(2, 10.1, 55, 4, 'D');
+        $html = '<p>Licencia de Pesca Deportiva</p>';
+        $pdf->writeHTMLCell('60', '10', 0, 10, $html, 0, 0, 0, true, 'C', false);
+
+        $fecha = Carbon::parse($licencia->expiration_date);
+        $fechaVigencia = $fecha->translatedFormat('j \d\e F \d\e Y');
+
+        $categ = explode("-", $lic['category'])[0];
+        $html = '<table cellpadding="0" cellspacing="2" style="border: 1px solid black;">
+        <tr>
+            <td><b>Categoria:</b> '.$categ.' </td>
+            <td><b>Num:</b> '.str_pad($licencia->id, 6, '0', STR_PAD_LEFT).'</td>
+        </tr>
+        <tr><td colspan="2"><b>Otorgado a:</b> '.$lic['name'].' '.$lic['lastname'].'</td></tr>
+        <tr><td colspan="2"><b>DNI:</b> '.$lic['document_number'].'</td></tr>
+        <tr><td colspan="2"><b>Domicilio:</b> '.$lic['address'].'.</td></tr>
+        <tr><td colspan="2"><b>Localidad:</b> '.$lic['city'].'</td></tr>
+        <tr><td colspan="2"><b>Provincia:</b> '.$lic['province'].', '.$lic['nationality'].'</td></tr>
+        <tr><td colspan="2"><b>Vigencia:</b> '.$fechaVigencia.'</td></tr>';
+        $pdf->SetFont('DejaVuSans', '', 8, '', true);
+        $pdf->writeHTMLCell('55', '30', 2, 15, $html, 0, 0, 0, true, 'L', false);
+
+        $pdf->SetDrawColor(0, 0, 0);
+        $color_fill = hex2rgb('#999DA0');
+        //$pdf->Rect(58.3, 15, 26.5, 30, 'D', array(), $color_fill);
+
+        /*image*/
+        list($imgWidth, $imgHeight) = getimagesize(public_path('storage/' . $user->profile_picture));
+        $maxWidth = 25;
+        $maxHeight = 26;
+        $scale = min($maxWidth / $imgWidth, $maxHeight / $imgHeight);
+        $finalWidth = $imgWidth * $scale;
+        $finalHeight = $imgHeight * $scale;
+        $x = 59 + (($maxWidth - $finalWidth) / 2);
+        $y = 16 + (($maxHeight - $finalHeight) / 2);
+
+        // si es png le agregamos el fondo blanco
+        $path = public_path('storage/' . $user->profile_picture);
+        $info = getimagesize($path);
+        if ($info && $info['mime'] === 'image/png') {
+            $image = imagecreatefrompng(public_path('storage/'.$user->profile_picture));
+            $background = imagecreatetruecolor(imagesx($image), imagesy($image));
+            $white = imagecolorallocate($background, 255, 255, 255);
+            imagefill($background, 0, 0, $white);
+            imagecopy($background, $image, 0, 0, 0, 0, imagesx($image), imagesy($image));
+            $temp_file = 'app/public/temp_'.time().'.jpg';
+            $tempPath = storage_path($temp_file);
+            imagejpeg($background, $tempPath, 90);
+            imagedestroy($image);
+            imagedestroy($background);
+            $pdf->Image($tempPath, $x, $y, $finalWidth, $finalHeight, 'JPG', '', '', true, 150);
+            // BORRADO DE ARCHIVO TEMPORAL (SI O SI si es png)
+            unlink($tempPath);
+        }
+        else{
+            $pdf->Image(public_path('storage/'.$user->profile_picture), $x, $y, $finalWidth, $finalHeight, 'JPG', '', '', true, 150);
+        }
+
+        $pdf->setPrintFooter(true);
+        $pdf->AddPage();
+        $html = <<<EOD
+    <table border="1" cellpadding="0" cellspacing="0" style="border: 1px solid black; background-color: #AAB8B7;">
+        <tr><td>Especies, Medidas y Cantidad para Pesca Deportiva</td></tr>
+    </thead>
+</table>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 7, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 2, $html, 0, 0, 0, true, 'C', false);
+
+        $html = <<<EOD
+    <table border="1" cellpadding="2" cellspacing="0">
+        <thead>
+        <tr style="background-color: #C4D4D3;">
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+        </tr>
+        </thead>
+        <tbody>
+EOD;
+        $html .= Species::all()->where('active', '=', 1)->chunk(3)->map(function ($chunk) {
+            $row = '<tr>';
+
+            foreach ($chunk as $specie) {
+                $row .= <<<EOD
+            <td width="15.3%">{$specie['name']}</td>
+            <td width="9%">{$specie['size']}</td>
+            <td width="9%">{$specie['quantity']}</td>
+        EOD;
+            }
+
+            $row .= '</tr>';
+            return $row;
+        })->implode('');
+
+        $html .= <<<EOD
+        </tbody>
+    </thead>
+</table>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 5, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 5.2, $html, 0, 0, 0, true, 'L', false);
+
+        $html = <<<EOD
+<p style="margin: 0px;"><b>Categorías</b> </p>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 8, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 30, $html, 0, 0, 0, true, 'L', false);
+
+        $html = <<<EOD
+<b>A:</b> Costa. <br>
+<b>B:</b> Costa / Embarcación a Remo <br>
+<b>C:</b> Costa / Embarcación a Remo / a Motor. <br>
+<b>D:</b> Turista </p>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 6.5, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 34, $html, 0, 0, 0, true, 'L', false);
+
+        $pdf->SetMargins(0, 0, 0);
+        $pdf->SetAutoPageBreak(false, 0);
+
+        $pdf->SetFont('DejaVuSans', '', 5, '', true);
+        $style = array(
+            'border' => 1,
+            'vpadding' => 0,
+            'hpadding' => 0,
+            'fgcolor' => array(0, 0, 0),
+            'bgcolor' => false,
+            'module_width' => 2,
+            'module_height' => 2,
+        );
+
+        /* creacion de la url encriptacion del id */
+        $app_url = env('APP_URL');
+        $hash = QREncrypt($licencia->id);
+        $url = $app_url.'/licence-validate/'.$hash;
+
+        $pdf->write2DBarcode($url, 'QRCODE,L', 64, 30, 20, 20, $style, 'N');
+
+        // Devolver el PDF como respuesta
+        $pdf->Output(storage_path("app/public/pdf/licencia_pesca_{$paymentId}.pdf"), 'F');
+        return storage_path("app/public/pdf/licencia_pesca_{$paymentId}.pdf");
+    }
+
+    public function previewHtml(){
+        $licencia = Licence::with('user')->where('id', 51)->first();
+        $user = User::where('email', 'ecouser@yopmail.com')->first();
+        $lic = json_decode($licencia->json_data, true);
+
+        $pdf = new PDFController('L', 'mm', [54, 85.60], true, 'UTF-8', false);
+        $pdf->SetCreator('Ministerio de Ecologia');
+        $pdf->SetAuthor('Departamento de Pesca');
+        $pdf->SetTitle('Licencia de Pesca');
+        $pdf->SetMargins(10, 0, 10);
+        $pdf->setPrintHeader(true);
+        $pdf->setPrintFooter(false);
+        $pdf->SetAutoPageBreak(false, 0);
+        $pdf->AddPage();
+
+        $pdf->SetFont('DejaVuSans', '', 4, '', true);
+
+        $html = '<table border="0" cellpadding="0" cellspacing="0">
+            <tr>
+                <td>MINISTERIO DE ECOLOGÍA Y RNR</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px; padding:0px;">D.G. de Ecología y Calidad Amb.</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px;">Dirección de Biodiversidad</td>
+            </tr>
+            <tr>
+                <td style="margin: 0px;">Departamento de Fauna</td>
+            </tr>
+        </table>';
+
+        $logoMnes = Logo::where('code', 'LOGO_PROV')->value('path_image');
+        $logoMnesExt = pathinfo($logoMnes, PATHINFO_EXTENSION);
+
+        $logoEco = Logo::where('code', 'LOGO_MINIS')->value('path_image');
+        $logoEcoExt = pathinfo($logoEco, PATHINFO_EXTENSION);
+
+        $pdf->writeHTMLCell('30', '10', 25, 1, $html, 0, 0, 0, true, 'C', false);
+        $pdf->Image(public_path('storage/'.$logoMnes), 5, 0, 20, 8, mb_strtoupper($logoMnesExt), '', '', true, 150, '', false, false, 0, false, false, false);
+
+        $pdf->Image(public_path('storage/'.$logoEco), 57, 0, 22, 8, mb_strtoupper($logoEcoExt), '', '', true, 150, '', false, false, 0, false, false, false);
+
+        $pdf->SetFont('DejaVuSans', '', 9, '', true);
+        $pdf->SetDrawColor(0, 0, 0);
+        //$pdf->Rect(2, 10.1, 55, 4, 'D');
+        $html = '<p>Licencia de Pesca Deportiva</p>';
+        $pdf->writeHTMLCell('60', '10', 0, 10, $html, 0, 0, 0, true, 'C', false);
+
+        $fecha = Carbon::parse($licencia->expiration_date);
+        $fechaVigencia = $fecha->translatedFormat('j \d\e F \d\e Y');
+
+        $categ = explode("-", $lic['category'])[0];
+        $html = '<table cellpadding="0" cellspacing="2" style="border: 1px solid black;">
+        <tr>
+            <td><b>Categoria:</b> '.$categ.' </td>
+            <td><b>Num:</b> '.str_pad($licencia->id, 6, '0', STR_PAD_LEFT).'</td>
+        </tr>
+        <tr><td colspan="2"><b>Otorgado a:</b> '.$lic['name'].' '.$lic['lastname'].'</td></tr>
+        <tr><td colspan="2"><b>DNI:</b> '.$lic['document_number'].'</td></tr>
+        <tr><td colspan="2"><b>Domicilio:</b> '.$lic['address'].'.</td></tr>
+        <tr><td colspan="2"><b>Localidad:</b> '.$lic['city'].'</td></tr>
+        <tr><td colspan="2"><b>Provincia:</b> '.$lic['province'].', '.$lic['nationality'].'</td></tr>
+        <tr><td colspan="2"><b>Vigencia:</b> '.$fechaVigencia.'</td></tr>';
+        $pdf->SetFont('DejaVuSans', '', 8, '', true);
+        $pdf->writeHTMLCell('55', '30', 2, 15, $html, 0, 0, 0, true, 'L', false);
+
+        $pdf->SetDrawColor(0, 0, 0);
+        $color_fill = hex2rgb('#999DA0');
+        //$pdf->Rect(58.3, 15, 26.5, 30, 'D', array(), $color_fill);
+
+        /*image*/
+        list($imgWidth, $imgHeight) = getimagesize(public_path('storage/' . $user->profile_picture));
+        $maxWidth = 25;
+        $maxHeight = 26;
+        $scale = min($maxWidth / $imgWidth, $maxHeight / $imgHeight);
+        $finalWidth = $imgWidth * $scale;
+        $finalHeight = $imgHeight * $scale;
+        $x = 59 + (($maxWidth - $finalWidth) / 2);
+        $y = 16 + (($maxHeight - $finalHeight) / 2);
+
+        // si es png le agregamos el fondo blanco
+        $path = public_path('storage/' . $user->profile_picture);
+        $info = getimagesize($path);
+        if ($info && $info['mime'] === 'image/png') {
+            $image = imagecreatefrompng(public_path('storage/'.$user->profile_picture));
+            $background = imagecreatetruecolor(imagesx($image), imagesy($image));
+            $white = imagecolorallocate($background, 255, 255, 255);
+            imagefill($background, 0, 0, $white);
+            imagecopy($background, $image, 0, 0, 0, 0, imagesx($image), imagesy($image));
+            $temp_file = 'app/public/temp_'.time().'.jpg';
+            $tempPath = storage_path($temp_file);
+            imagejpeg($background, $tempPath, 90);
+            imagedestroy($image);
+            imagedestroy($background);
+            $pdf->Image($tempPath, $x, $y, $finalWidth, $finalHeight, 'JPG', '', '', true, 150);
+            // BORRADO DE ARCHIVO TEMPORAL (SI O SI si es png)
+            unlink($tempPath);
+        }
+        else{
+            $pdf->Image(public_path('storage/'.$user->profile_picture), $x, $y, $finalWidth, $finalHeight, 'JPG', '', '', true, 150);
+        }
+
+        $pdf->setPrintFooter(true);
+        $pdf->AddPage();
+        $html = <<<EOD
+    <table border="1" cellpadding="0" cellspacing="0" style="border: 1px solid black; background-color: #AAB8B7;">
+        <tr><td>Especies, Medidas y Cantidad para Pesca Deportiva</td></tr>
+    </thead>
+</table>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 7, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 2, $html, 0, 0, 0, true, 'C', false);
+
+        $html = <<<EOD
+    <table border="1" cellpadding="2" cellspacing="0">
+        <thead>
+        <tr style="background-color: #C4D4D3;">
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+            <th width="15.3%" style="font-weight: bold; text-align: center;">Especie</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Med.
+                Min.
+                Cm.</th>
+            <th width="9%" style="font-weight: bold; text-align: center;">Cant.
+                Max.
+                Unid.</th>
+        </tr>
+        </thead>
+        <tbody>
+EOD;
+        $html .= Species::all()->where('active', '=', 1)->chunk(3)->map(function ($chunk) {
+            $row = '<tr>';
+
+            foreach ($chunk as $specie) {
+                $row .= <<<EOD
+            <td width="15.3%">{$specie['name']}</td>
+            <td width="9%">{$specie['size']}</td>
+            <td width="9%">{$specie['quantity']}</td>
+        EOD;
+            }
+
+            $row .= '</tr>';
+            return $row;
+        })->implode('');
+
+        $html .= <<<EOD
+        </tbody>
+    </thead>
+</table>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 5, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 5.2, $html, 0, 0, 0, true, 'L', false);
+
+        $html = <<<EOD
+<p style="margin: 0px;"><b>Categorías</b> </p>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 8, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 30, $html, 0, 0, 0, true, 'L', false);
+
+        $html = <<<EOD
+<b>A:</b> Costa. <br>
+<b>B:</b> Costa / Embarcación a Remo <br>
+<b>C:</b> Costa / Embarcación a Remo / a Motor. <br>
+<b>D:</b> Turista </p>
+EOD;
+        $pdf->SetFont('DejaVuSans', '', 6.5, '', true);
+        $pdf->writeHTMLCell('85', '10', 0, 34, $html, 0, 0, 0, true, 'L', false);
+
+        $pdf->SetMargins(0, 0, 0);
+        $pdf->SetAutoPageBreak(false, 0);
+
+        $pdf->SetFont('DejaVuSans', '', 5, '', true);
+        $style = array(
+            'border' => 1,
+            'vpadding' => 0,
+            'hpadding' => 0,
+            'fgcolor' => array(0, 0, 0),
+            'bgcolor' => false,
+            'module_width' => 2,
+            'module_height' => 2,
+        );
+
+        /* creacion de la url encriptacion del id */
+        $app_url = env('APP_URL');
+        $hash = QREncrypt($licencia->id);
+        $url = $app_url.'/licence-validate/'.$hash;
+
+        $pdf->write2DBarcode($url, 'QRCODE,L', 64, 30, 20, 20, $style, 'N');
+
+        // Devolver el PDF como respuesta
+        $pdf->Output("licencia_pesca_{$licencia->id}.pdf", 'I');
+    }
+}
+===== app/Filament/App/Resources/LicenceResource/Pages/PayLicence.php
+<?php
+
+namespace App\Filament\App\Resources\LicenceResource\Pages;
+
+use App\Enums\Parameters;
+use App\Enums\Payments;
+use App\Filament\App\Resources\LicenceResource;
+use App\Models\GeneralList;
+use App\Models\Licence;
+use App\Models\Payment;
+use App\Models\Parameter;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Section;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Contracts\HasForms;
+use Filament\Forms\Form;
+use Filament\Notifications\Notification;
+use Filament\Pages\Concerns\InteractsWithFormActions;
+use Filament\Resources\Pages\Page;
+use Filament\Actions\Action;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use PlusPagos\AESEncrypter;
+use PlusPagos\SHA256Encript;
+
+class PayLicence extends Page implements HasForms {
+
+    use InteractsWithFormActions;
+
+    protected static string $resource = LicenceResource::class;
+    protected static ?string $title = 'Pagar licencia';
+    protected static string $view = 'filament.app.resources.licence-resource.pages.pay-licence';
+
+    public $licence_id;
+    public $CallbackSuccess;
+    public $CallbackCancel;
+    public $Comercio;
+    public $TransaccionComercioId;
+    public $Monto;
+    public $Producto;
+    public $MontoProducto;
+    public $montoBruto;
+    public $montoDescuento;
+
+    public $InformacionAdicional;
+    public $url_sandbox;
+
+    public $hash;
+    public $SucursalComercio;
+    public $secretKey;
+    public $SHA256Encript;
+
+    public function mount($record) {
+        $this->licence_id = $record;
+        $this->preparePayment();
+    }
+
+    private function preparePayment() {
+        $arr = GeneralList::where('code',
+            Parameter::where('const', Parameters::PAYMENT->const())->value('code')
+        )->pluck('s_value', 'value')->toArray();
+
+        $json_data = Licence::where('id', $this->licence_id)->first()->json_data;
+        $licence_data = json_decode($json_data, true);
+        $this->montoBruto = (isset($licence_data['monto_bruto']))? $licence_data['monto_bruto'] : 0;
+        $this->montoDescuento = (isset($licence_data['monto_descuento']))? $licence_data['monto_descuento'] : 0;
+
+        $monto_cents = $licence_data['monto_licencia_cents'];
+        $monto = $monto_cents / 100;
+
+        $descripcion_licencia = $licence_data['category'];
+        $this->url_sandbox = $arr['URL'];
+        $this->secretKey = $arr['SECRETKEY'];
+        $comercioId = $arr['COMERCIO'];
+
+        if (empty($this->secretKey) || empty($comercioId)) {
+            Log::error('Configuración de MacroClick incompleta');
+            throw new \Exception('Configuración incompleta: Claves requeridas faltantes.');
+        }
+
+        $transaccionId = $this->licence_id.'_Time:'.time();
+        $url = env('APP_URL');
+        $callbackSuccess = $url.$arr['CALLBACK_SUCCESS'].'&licencia='.$this->licence_id;
+        $callbackCancel = $url.$arr['CALLBACK_CANCEL'].'&licencia='.$this->licence_id;
+
+
+        try {
+            $aes = new AESEncrypter();
+            $this->CallbackSuccess = $aes->EncryptString($callbackSuccess, $this->secretKey);
+            $this->CallbackCancel = $aes->EncryptString($callbackCancel, $this->secretKey);
+            $this->Comercio = $comercioId; // Sin encriptar
+            $this->TransaccionComercioId = $transaccionId; // Sin encriptar
+            $this->Monto = $aes->EncryptString($monto_cents, $this->secretKey);
+            $this->Producto = $descripcion_licencia;// Sin encriptar
+            $this->MontoProducto = number_format($monto, '2', '.');// Sin encriptar
+            $this->InformacionAdicional = $aes->EncryptString($this->licence_id. ' Info Adicional', $this->secretKey);
+            $this->SucursalComercio = $aes->EncryptString('0000000000', $this->secretKey);
+            $this->hash = $this->generateSignature($monto_cents);
+
+            $payment = Payment::where('id_licence', $this->licence_id)
+                            ->whereNotIn('state', ['CANCELADO'])
+                            ->where('id_user', Auth::id())
+                            ->first();
+
+            if($payment == null){
+                Payment::create([
+                    'id_transaction' => $transaccionId,
+                    'id_user' => Auth::id(),
+                    'id_licence'=> $this->licence_id,
+                    'state' => Payments::CREADA->label(),
+                    'type_transaction' => null,
+                    'json_data' => null,
+                ]);
+            }
+            else{
+                Payment::updated([
+                    'id_transaction' => $transaccionId,
+                    'state' => Payments::CREADA->label(),
+                    'type_transaction' => null,
+                    'json_data' => null,
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error al encriptar datos para el pago: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw new \Exception('Error al preparar los datos de pago. Consulte al administrador.'.$e->getMessage());
+        }
+    }
+
+    protected function generateSignature($amount)
+    {
+        try {
+            $SHA256Encript = new SHA256Encript();
+            return $SHA256Encript->Generate(
+                request()->ip(),
+                $this->secretKey,
+                $this->Comercio,
+                $this->SucursalComercio,
+                number_format($amount * 100, 0, '', '')
+            );
+        } catch (\Exception $e) {
+            Log::error('Error generando firma digital: ' . $e->getMessage());
+            throw new \Exception('Error al generar la firma digital.');
+        }
+    }
+
+}
+===== resources/views/filament/app/resources/licence-resource/pages/pay-licence.blade.php
+<x-filament-panels::page>
+    <div class="flex flex-col justify-start items-center h-screen">
+        <div class="fi-section-content-ctn rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5
+            dark:bg-gray-900 dark:ring-white/10 md:col-span-2 p-6
+            w-1/2">
+            <div class="flex items-center justify-center gap-x-3">
+                <img src="{{ asset('/storage/'.Auth::user()->profile_picture) }}" alt="Imagen de Carnet" class="w-20 h-20 rounded-full">
+            </div>
+            <div class="flex items-center justify-center gap-x-3 mt-6 mb-4">
+                <h3>{{ Auth::user()->name }} {{ Auth::user()->lastname }}</h3>
+            </div>
+            <div class="flex items-center justify-center gap-x-3 mt-6 mb-4">
+                <h3>Nro. de Licencia: {{ str_pad($licence_id, 5, '0', STR_PAD_LEFT) }}</h3>
+            </div>
+            <form action="{{ $url_sandbox }}" method="POST" class="" target="payment" id="formPayment">
+                @csrf
+                <input type="hidden" name="CallbackSuccess" value="{{ $CallbackSuccess }}">
+                <input type="hidden" name="CallbackCancel" value="{{ $CallbackCancel }}">
+                <input type="hidden" name="COMERCIO" value="***REDACTADO***">
+                <input type="hidden" name="TransaccionComercioId" value="***REDACTADO***">
+                <input type="hidden" name="Monto" value="{{ $Monto }}">
+                <input type="hidden" name="Informacion" value="{{ $InformacionAdicional }}">
+                <input type="hidden" name="SucursalComercio" value="***REDACTADO***">
+                <input type="hidden" name="Hash" value="{{ $hash }}">
+
+                <div class="grid gap-y-2">
+                    <div class="flex items-center gap-x-3 justify-between">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="producto">
+                            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">Tipo de Licencia</span>
+                        </label>
+                    </div>
+                    <div class="grid auto-cols-fr gap-y-2">
+                        <div class="fi-input-wrp flex rounded-lg shadow-sm ring-1 transition duration-75 bg-white dark:bg-white/5 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-2 ring-gray-950/10 dark:ring-white/20 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-600 dark:[&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-500 fi-fo-text-input overflow-hidden">
+                            <div class="fi-input-wrp-input min-w-0 flex-1">
+                                <input
+                                    class="fi-input block w-full border-none py-1.5 text-base text-gray-950 transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 disabled:[-webkit-text-fill-color:theme(colors.gray.500)] disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.400)] dark:text-white dark:placeholder:text-gray-500 dark:disabled:text-gray-400 dark:disabled:[-webkit-text-fill-color:theme(colors.gray.400)] dark:disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.500)] sm:text-sm sm:leading-6 bg-white/0 ps-3 pe-3"
+                                    value="{{ $Producto }}"
+                                    readonly
+                                    id="Producto[0]"
+                                    required="required"
+                                    type="text"
+                                    name="Producto[0]"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {{--<div class="grid gap-y-2 mt-2">
+                    <div class="flex items-center gap-x-3 justify-between ">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="monto_bruto">
+                            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">Monto Bruto</span>
+                        </label>
+                    </div>
+                    <div class="grid auto-cols-fr gap-y-2">
+                        <div class="fi-input-wrp flex rounded-lg shadow-sm ring-1 transition duration-75 bg-white dark:bg-white/5 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-2 ring-gray-950/10 dark:ring-white/20 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-600 dark:[&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-500 fi-fo-text-input overflow-hidden">
+                            <div class="fi-input-wrp-input min-w-0 flex-1">
+                                <input
+                                    class="fi-input block w-full border-none py-1.5 text-base text-gray-950 transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 disabled:[-webkit-text-fill-color:theme(colors.gray.500)] disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.400)] dark:text-white dark:placeholder:text-gray-500 dark:disabled:text-gray-400 dark:disabled:[-webkit-text-fill-color:theme(colors.gray.400)] dark:disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.500)] sm:text-sm sm:leading-6 bg-white/0 ps-3 pe-3"
+                                    value="{{ $montoBruto }}"
+                                    readonly
+                                    id="monto_bruto"
+                                    disabled="disabled"
+                                    type="text"
+                                    name="monto_bruto"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid gap-y-2 mt-2">
+                    <div class="flex items-center gap-x-3 justify-between ">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="monto_descuento">
+                            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">Monto Descuento</span>
+                        </label>
+                    </div>
+                    <div class="grid auto-cols-fr gap-y-2">
+                        <div class="fi-input-wrp flex rounded-lg shadow-sm ring-1 transition duration-75 bg-white dark:bg-white/5 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-2 ring-gray-950/10 dark:ring-white/20 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-600 dark:[&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-500 fi-fo-text-input overflow-hidden">
+                            <div class="fi-input-wrp-input min-w-0 flex-1">
+                                <input
+                                    class="fi-input block w-full border-none py-1.5 text-base text-gray-950 transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 disabled:[-webkit-text-fill-color:theme(colors.gray.500)] disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.400)] dark:text-white dark:placeholder:text-gray-500 dark:disabled:text-gray-400 dark:disabled:[-webkit-text-fill-color:theme(colors.gray.400)] dark:disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.500)] sm:text-sm sm:leading-6 bg-white/0 ps-3 pe-3"
+                                    value="{{ $montoDescuento }}"
+                                    readonly
+                                    id="monto_descuento"
+                                    disabled="disabled"
+                                    type="text"
+                                    name="monto_descuento"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>--}}
+
+                <div class="grid gap-y-2 mt-2">
+                    <div class="flex items-center gap-x-3 justify-between ">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="producto">
+                            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">Monto a Pagar</span>
+                        </label>
+                    </div>
+                    <div class="grid auto-cols-fr gap-y-2">
+                        <div class="fi-input-wrp flex rounded-lg shadow-sm ring-1 transition duration-75 bg-white dark:bg-white/5 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-2 ring-gray-950/10 dark:ring-white/20 [&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-600 dark:[&amp;:not(:has(.fi-ac-action:focus))]:focus-within:ring-primary-500 fi-fo-text-input overflow-hidden">
+                            <div class="fi-input-wrp-input min-w-0 flex-1">
+                                <input
+                                    class="fi-input block w-full border-none py-1.5 text-base text-gray-950 transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 disabled:[-webkit-text-fill-color:theme(colors.gray.500)] disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.400)] dark:text-white dark:placeholder:text-gray-500 dark:disabled:text-gray-400 dark:disabled:[-webkit-text-fill-color:theme(colors.gray.400)] dark:disabled:placeholder:[-webkit-text-fill-color:theme(colors.gray.500)] sm:text-sm sm:leading-6 bg-white/0 ps-3 pe-3"
+                                    value="{{ $MontoProducto }}"
+                                    readonly
+                                    id="MontoProducto[0]"
+                                    required="required"
+                                    type="text"
+                                    name="MontoProducto[0]"
+                                >
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="fi-ac gap-3 flex flex-wrap items-center flex-col mt-6">
+                    <button
+                        style="--c-400:var(--primary-400);--c-500:var(--primary-500);--c-600:var(--primary-600);"
+                        class="w-1/2 fi-btn relative grid-flow-col items-center justify-center font-semibold outline-none transition duration-75 focus-visible:ring-2 rounded-lg fi-color-custom fi-btn-color-primary fi-color-primary fi-size-md fi-btn-size-md gap-1.5 px-3 py-2 text-sm inline-grid shadow-sm bg-custom-600 text-white hover:bg-custom-500 focus-visible:ring-custom-500/50 dark:bg-custom-500 dark:hover:bg-custom-400 dark:focus-visible:ring-custom-400/50 fi-ac-action fi-ac-btn-action"
+                        type="submit"
+                    >
+                    <span class="fi-btn-label">
+                        Pagar
+                    </span>
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <div id="overlayPayment" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 p-6 w-1/2 flex flex-col items-center justify-center dark:bg-gray-900 dark:ring-white/10">
+            <div class="flex items-center justify-center gap-x-3 mb-6">
+                <h3 id="overlayTitle" class="text-xl font-semibold text-gray-900 dark:text-white">Procesando pago...</h3>
+            </div>
+            <div class="flex items-center justify-center flex-col gap-4">
+                <div id="overlayLoader" class="loader"></div>
+                <span id="overlayMessage" class="text-gray-700 text-lg dark:text-white">Por favor espera mientras procesamos tu pago</span>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #4ade80;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+    </style>
+
+    <script>
+        let paymentCheckInterval;
+        let paymentWindowClosed = false;
+
+        document.getElementById('formPayment').addEventListener('submit', function(e) {
+            // Abrir nueva ventana
+            window.pagoWin = window.open('', 'payment');
+            // Mostrar overlay
+            document.getElementById('overlayPayment').style.display = 'flex';
+            paymentWindowClosed = false;
+
+            // Iniciar intervalo para detectar cierre de ventana
+            paymentCheckInterval = setInterval(function() {
+                if (pagoWin && pagoWin.closed && !paymentWindowClosed) {
+                    paymentWindowClosed = true;
+                    clearInterval(paymentCheckInterval);
+
+                    // Procesar como cancelado cuando el usuario cierra la ventana
+                    handlePaymentResponse({
+                        type: 'paymentCancel',
+                        result: 'cancel',
+                        licencia: '{{ $licence_id }}'
+                    });
+                }
+            }, 500);
+        });
+
+        // Escuchar mensajes del popup con el nuevo formato
+        window.addEventListener('message', function(event) {
+            // Verificar si es un mensaje de pago (nuevo formato)
+            if (event.data && typeof event.data === 'object' &&
+                (event.data.type === 'paymentSuccess' || event.data.type === 'paymentCancel')) {
+
+                clearInterval(paymentCheckInterval);
+                paymentWindowClosed = true;
+                handlePaymentResponse(event.data);
+            }
+        });
+
+        const handlePaymentResponse = (response) => {
+            // Cerrar ventana de pago si aún está abierta
+            if (window.pagoWin && !window.pagoWin.closed) {
+                window.pagoWin.close();
+            }
+
+            // Obtener elementos del overlay
+            const overlayTitle = document.getElementById('overlayTitle');
+            const overlayMessage = document.getElementById('overlayMessage');
+            const overlayLoader = document.getElementById('overlayLoader');
+
+            if (response.type === 'paymentSuccess') {
+                // Pago exitoso - mostrar mensaje de éxito
+                overlayTitle.textContent = '¡Pago aprobado!';
+                overlayTitle.className = 'text-xl font-semibold text-green-600 dark:text-green-400';
+                overlayMessage.textContent = 'Tu pago fue procesado exitosamente. Redirigiendo...';
+                overlayLoader.style.display = 'none';
+
+                // Redirigir después de 3 segundos
+                setTimeout(() => {
+                    location.href = '/app/licences?payment=accept&licencia=' + response.licencia;
+                }, 3000);
+            } else {
+                // Pago cancelado - mostrar mensaje de cancelación
+                overlayTitle.textContent = 'Pago cancelado';
+                overlayTitle.className = 'text-xl font-semibold text-red-600 dark:text-red-400';
+                overlayMessage.textContent = 'El pago fue cancelado o no se pudo procesar. Redirigiendo...';
+                overlayLoader.style.display = 'none';
+
+                // Redirigir después de 3 segundos
+                setTimeout(() => {
+                    location.href = '/app/licences?payment=cancel&licencia=' + response.licencia;
+                }, 3000);
+            }
+        };
+    </script>
+</x-filament-panels::page>
+===== resources/views/callback-payment.blade.php
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procesando Pago</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<style>
+    .loader {
+        border: 8px solid #f3f3f3;
+        border-top: 8px solid #4ade80;
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1rem;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg);}
+        100% { transform: rotate(360deg);}
+    }
+
+    #app-callback-background {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-image: url('/background.jpg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        z-index: -1;
+    }
+
+    #over_back {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        backdrop-filter: blur(4px);
+        background-color: rgba(0,0,0,0.5);
+        overflow-y: auto;
+    }
+</style>
+<body id="app-callback-background">
+<div id="over_back">
+    <div class="flex flex-col justify-start items-center h-screen">
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 p-6 w-1/2 flex flex-col items-center justify-center mt-20">
+            <div class="flex items-center justify-center gap-x-3 mb-6">
+                <h3 class="text-xl font-semibold">
+                    {{ $result === 'success' ? '¡Pago realizado con éxito!' : '¡Pago incompleto o cancelado!' }}
+                </h3>
+            </div>
+            <div class="flex items-center justify-center flex-col gap-4">
+                <div class="loader"></div>
+                <span class="text-gray-700 text-lg">Procesando, por favor espera...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const result = '{{ $result }}';
+        const licencia = '{{ $licencia ?? "" }}';
+        const message = result === 'success' ? 'paymentSuccess' : 'paymentCancel';
+
+        console.log('Payment result:', result);
+        console.log('Licencia:', licencia);
+
+        setTimeout(function() {
+            if (window.opener) {
+                // Enviar mensaje a la ventana padre con el resultado y la licencia
+                window.opener.postMessage({
+                    type: message,
+                    result: result,
+                    licencia: licencia
+                }, '*');
+            }
+
+            setTimeout(function() {
+                window.close();
+            }, 500);
+        }, 2000);
+    });
+</script>
+</body>
+</html>
+===== database/seeders/PaymentConfigurationSeeder.php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\GeneralList;
+use App\Models\Parameter;
+use Carbon\Carbon;
+use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Illuminate\Database\Seeder;
+
+class PaymentConfigurationSeeder extends Seeder
+{
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        Parameter::factory()->create([
+            'id' => 3,
+            'code' => 3,
+            'const' => 'PAYMENT',
+            'd_description' => 'Configuracion de Pagos',
+            's_value' => null,
+            'i_value' => null,
+            'n_value' => null,
+            'dt_value' => null,
+            'type' => 'list',
+            'active' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+
+
+        GeneralList::factory()->create([
+            'code' => 3,
+            'value' => 'SECRETKEY',
+            's_value' => 'CLAVE TAPADA',
+            's_value2' => 'Secret Key de Click de Pagos',
+            'i_value' => null,
+            'i_value2' => null,
+            'n_value' => null,
+            'n_value2' => null,
+            'dt_value' => null,
+            'dt_value2' => null,
+            'active' => 1,
+            'sort' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+
+        GeneralList::factory()->create([
+            'code' => 3,
+            'value' => 'COMERCIO',
+            's_value' => 'CLAVE TAPADA',
+            's_value2' => 'ID de Comercio de Click de Pagos',
+            'i_value' => null,
+            'i_value2' => null,
+            'n_value' => null,
+            'n_value2' => null,
+            'dt_value' => null,
+            'dt_value2' => null,
+            'active' => 1,
+            'sort' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+
+        GeneralList::factory()->create([
+            'code' => 3,
+            'value' => 'CALLBACK_SUCCESS',
+            's_value' => '/callback-payment?result=success',
+            's_value2' => 'Callback Successful',
+            'i_value' => null,
+            'i_value2' => null,
+            'n_value' => null,
+            'n_value2' => null,
+            'dt_value' => null,
+            'dt_value2' => null,
+            'active' => 1,
+            'sort' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+
+        GeneralList::factory()->create([
+            'code' => 3,
+            'value' => 'CALLBACK_CANCEL',
+            's_value' => '/callback-payment?result=cancel',
+            's_value2' => 'Callback Cancel',
+            'i_value' => null,
+            'i_value2' => null,
+            'n_value' => null,
+            'n_value2' => null,
+            'dt_value' => null,
+            'dt_value2' => null,
+            'active' => 1,
+            'sort' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+
+        GeneralList::factory()->create([
+            'code' => 3,
+            'value' => 'URL',
+            's_value' =>  'https://sandboxpp.asjservicios.com.ar/',
+            's_value2' => 'URL de pagos',
+            'i_value' => null,
+            'i_value2' => null,
+            'n_value' => null,
+            'n_value2' => null,
+            'dt_value' => null,
+            'dt_value2' => null,
+            'active' => 1,
+            'sort' => 1,
+            'created_by' => 1,
+            'updated_by' => null,
+            'created_at' => Carbon::now(),
+            'updated_at' => null,
+        ]);
+    }
+}
+===== database/migrations/2025_05_16_114401_create_payments_table.php
+<?php
+
+use App\Enums\Payments;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('payments', function (Blueprint $table) {
+            $table->id();
+            $table->string('id_transaction');
+            $table->foreignId('id_user')->constrained('users')->onDelete('cascade');
+            $table->foreignId('id_licence')->constrained('licences')->onDelete('restrict');
+            $table->string('state', 50)->default(Payments::CREADA);
+            $table->string('type_transaction', 50)->nullable();
+            $table->json('json_data')->nullable();
+            $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('restrict');
+            $table->foreignId('updated_by')->nullable()->constrained('users')->onDelete('restrict');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('payments');
+    }
+};
+===== routes/web.php
+<?php
+
+use App\Http\Controllers\Auth\VerificationController;
+use App\Http\Controllers\CertificateController;
+use App\Http\Controllers\LicenceValidationController;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Route;
+use Livewire\Livewire;
+
+Livewire::setUpdateRoute(function ($handle) {
+    return Route::post('/livewire/update', $handle);
+});
+
+Route::get('app/email-verification/verify/{id}/{hash}', [VerificationController::class, 'verify'])
+    ->middleware(['signed'])
+    ->name('filament.app.auth.email-verification.verify');
+
+// Ruta independiente para callback de pago (sin autenticación)
+Route::get('/callback-payment', function () {
+    $result = request('result');
+    $licencia = request('licencia');
+    return view('callback-payment', ['result' => $result, 'licencia' => $licencia]);
+})->name('callback.payment');
+
+Route::get('/licence-validate/{hash}', [LicenceValidationController::class, 'validate'])
+    ->name('licence.validate');
+
+Route::get('/certificates/verify/{hash}', [CertificateController::class, 'verify'])
+    ->name('certificates.verify');
+
+Route::get('/certificates/{certificate}/pdf', [CertificateController::class, 'generatePdf'])
+    ->middleware(['auth'])
+    ->name('certificates.pdf');
+
+Route::get('/download/license/{paymentId}', function ($paymentId) {
+    $path = storage_path("app/public/pdf/licencia_pesca_{$paymentId}.pdf");
+
+    if (!file_exists($path)) {
+        abort(404, 'Archivo no encontrado.');
+    }
+
+    return response()->download($path, "licencia_pesca_{$paymentId}.pdf");
+})->name('download.license');
+
+Route::get('/storage-link', function(){
+    $targetFolder = storage_path('app/public');
+    $linkFolder = $_SERVER['DOCUMENT_ROOT'].'/storage';
+
+    try {
+        symlink($targetFolder,$linkFolder);
+        echo 'Symlink process successfully completed';
+    } catch (Exception $e) {
+        Artisan::call('storage:link');
+        echo 'Symlink Artisan process successfully completed';
+    }
+});
+===== routes/api.php
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\WebhookController;
+
+Route::post('/webhook/payment', [WebhookController::class, 'handlePaymentWebhook']);
+Route::get('/webhook/preview', [WebhookController::class, 'previewHtml']);
+===== app/Models/PaymentHist.php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class PaymentHist extends Model
+{
+    protected $table = 'payments_hist';
+
+    protected $fillable = [
+        'code',
+        'data',
+        'operation',
+        'user_id',
+    ];
+
+    protected $casts = [
+        'data' => 'array',
+    ];
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+}
+===== app/Models/Payment.php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Auth;
+
+class Payment extends Model {
+    use HasFactory;
+
+    protected $table = 'payments';
+
+    protected $fillable = [
+        'id_transaction',
+        'id_user',
+        'id_licence',
+        'state',
+        'type_transaction',
+        'json_data',
+        'created_by',
+        'updated_by'
+    ];
+
+    protected $casts = [
+        'json_data' => 'array'
+    ];
+
+    public function user() {
+        return $this->belongsTo(User::class, 'id_user');
+    }
+
+    public function licence() {
+        return $this->belongsTo(Licence::class, 'id_licence');
+    }
+
+    public function country() {
+        return $this->belongsTo(Country::class);
+    }
+
+    public function municipios()
+    {
+        return $this->hasMany(City::class);
+    }
+
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function updater(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    protected static function booted()
+    {
+        static::creating(function ($model) {
+            if (Auth::check()) {
+                $model->created_by = Auth::id();
+                $model->updated_at = null;
+            }
+        });
+
+        static::updating(function ($model) {
+            if (Auth::check()) {
+                $model->updated_by = Auth::id();
+            }
+        });
+    }
+}
+===== app/Observers/CategoryPriceObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\CategoryPrice;
+use App\Models\CategoryPriceHist;
+use Illuminate\Support\Facades\Auth;
+
+class CategoryPriceObserver
+{
+    public function updated(CategoryPrice $categoryPrice): void
+    {
+        CategoryPriceHist::create([
+            'code' => $categoryPrice->fishingCategory?->type_value,
+            'operation' => 'update',
+            'data' => [
+                'before' => $categoryPrice->getOriginal(),
+                'after' => $categoryPrice->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(CategoryPrice $categoryPrice): void
+    {
+        CategoryPriceHist::create([
+            'code' => $categoryPrice->fishingCategory?->type_value,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $categoryPrice->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/CityObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\City;
+use App\Models\CityHist;
+use Illuminate\Support\Facades\Auth;
+
+class CityObserver
+{
+    public function updated(City $city): void
+    {
+        CityHist::create([
+            'code' => $city->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $city->getOriginal(),
+                'after' => $city->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(City $city): void
+    {
+        CityHist::create([
+            'code' => $city->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $city->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ClubDiscountObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\ClubDiscount;
+
+use App\Models\ClubDiscountHist;
+use Illuminate\Support\Facades\Auth;
+class ClubDiscountObserver
+{
+    public function updated(ClubDiscount $clubDiscount): void
+    {
+        ClubDiscountHist::create([
+            'code' => $clubDiscount->club?->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $clubDiscount->getOriginal(),
+                'after' => $clubDiscount->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(ClubDiscount $clubDiscount): void
+    {
+        ClubDiscountHist::create([
+            'code' => $clubDiscount->club?->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $clubDiscount->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ClubMemberObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\ClubMember;
+use App\Models\ClubMemberHist;
+use Illuminate\Support\Facades\Auth;
+class ClubMemberObserver
+{
+    public function updated(ClubMember $clubMember): void
+    {
+        ClubMemberHist::create([
+            'code' => $clubMember->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $clubMember->getOriginal(),
+                'after' => $clubMember->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(ClubMember $clubMember): void
+    {
+        ClubMemberHist::create([
+            'code' => $clubMember->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $clubMember->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ClubObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Club;
+use App\Models\ClubHist;
+use Illuminate\Support\Facades\Auth;
+class ClubObserver
+{
+    public function updated(Club $club): void
+    {
+        ClubHist::create([
+            'code' => $club->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $club->getOriginal(),
+                'after' => $club->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Club $club): void
+    {
+        ClubHist::create([
+            'code' => $club->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $club->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/CommunicationsObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Communications;
+use App\Models\CommunicationHist;
+use Illuminate\Support\Facades\Auth;
+class CommunicationsObserver
+{
+    public function updated(Communications $communications): void
+    {
+        CommunicationHist::create([
+            'code' => $communications->type_value,
+            'operation' => 'update',
+            'data' => [
+                'before' => $communications->getOriginal(),
+                'after' => $communications->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Communications $communications): void
+    {
+        CommunicationHist::create([
+            'code' => $communications->type_value,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $communications->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/CountryObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Country;
+use App\Models\CountryHist;
+use Illuminate\Support\Facades\Auth;
+class CountryObserver
+{
+    public function updated(Country $ctry): void
+    {
+        CountryHist::create([
+            'code' => $ctry->short_name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $ctry->getOriginal(),
+                'after' => $ctry->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Country $ctry): void
+    {
+        CountryHist::create([
+            'code' => $ctry->short_name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $ctry->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/FishingCategoryObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\FishingCategory;
+use App\Models\FishingCategoryHist;
+use Illuminate\Support\Facades\Auth;
+
+class FishingCategoryObserver
+{
+    public function updated(FishingCategory $fishingCategory): void
+    {
+        FishingCategoryHist::create([
+            'code' => $fishingCategory->type_value,
+            'operation' => 'update',
+            'data' => [
+                'before' => $fishingCategory->getOriginal(),
+                'after' => $fishingCategory->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(FishingCategory $fishingCategory): void
+    {
+        FishingCategoryHist::create([
+            'code' => $fishingCategory->type_value,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $fishingCategory->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/GeneralListObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\GeneralList;
+use App\Models\GeneralListHist;
+use Illuminate\Support\Facades\Auth;
+
+class GeneralListObserver
+{
+    public function updated(GeneralList $gral): void
+    {
+        GeneralListHist::create([
+            'code' => $gral->value,
+            'operation' => 'update',
+            'data' => [
+                'before' => $gral->getOriginal(),
+                'after' => $gral->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(GeneralList $gral): void
+    {
+        GeneralListHist::create([
+            'code' => $gral->value,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $gral->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/LicenceObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Licence;
+use App\Models\LicenceHist;
+use Illuminate\Support\Facades\Auth;
+
+class LicenceObserver
+{
+    public function updated(Licence $licence): void
+    {
+        LicenceHist::create([
+            'code' => $licence->id,
+            'operation' => 'update',
+            'data' => [
+                'before' => $licence->getOriginal(),
+                'after' => $licence->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Licence $licence): void
+    {
+        LicenceHist::create([
+            'code' => $licence->id,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $licence->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ParameterObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Parameter;
+use App\Models\ParameterHist;
+use Illuminate\Support\Facades\Auth;
+
+class ParameterObserver
+{
+    /**
+     * Handle the Parameter "updated" event.
+     */
+    public function updated(Parameter $parameter): void
+    {
+        ParameterHist::create([
+            'code' => $parameter->const,
+            'operation' => 'update',
+            'data' => [
+                'before' => $parameter->getOriginal(),
+                'after' => $parameter->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    /**
+     * Handle the Parameter "deleted" event.
+     */
+    public function deleted(Parameter $parameter): void
+    {
+        ParameterHist::create([
+            'code' => $parameter->const,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $parameter->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/PaymentObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Payment;
+use App\Models\PaymentHist;
+use Illuminate\Support\Facades\Auth;
+
+class PaymentObserver
+{
+    public function updated(Payment $payment): void
+    {
+        PaymentHist::create([
+            'code' => $payment->id_transaction,
+            'operation' => 'update',
+            'data' => [
+                'before' => $payment->getOriginal(),
+                'after' => $payment->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Payment $payment): void
+    {
+        PaymentHist::create([
+            'code' => $payment->id_transaction,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $payment->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ProfessionObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Profession;
+use App\Models\ProfessionHist;
+use Illuminate\Support\Facades\Auth;
+class ProfessionObserver
+{
+    public function updated(Profession $profession): void
+    {
+        ProfessionHist::create([
+            'code' => $profession->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $profession->getOriginal(),
+                'after' => $profession->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Profession $profession): void
+    {
+        ProfessionHist::create([
+            'code' => $profession->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $profession->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/ProvinceObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Province;
+use App\Models\ProvinceHist;
+use Illuminate\Support\Facades\Auth;
+class ProvinceObserver
+{
+    public function updated(Province $province): void
+    {
+        ProvinceHist::create([
+            'code' => $province->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $province->getOriginal(),
+                'after' => $province->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Province $province): void
+    {
+        ProvinceHist::create([
+            'code' => $province->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $province->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/SpeciesObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\SpecieHist;
+use App\Models\Species;
+use Illuminate\Support\Facades\Auth;
+class SpeciesObserver
+{
+    public function updated(Species $species): void
+    {
+        SpecieHist::create([
+            'code' => $species->name,
+            'operation' => 'update',
+            'data' => [
+                'before' => $species->getOriginal(),
+                'after' => $species->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Species $species): void
+    {
+        SpecieHist::create([
+            'code' => $species->name,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $species->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/TransactionObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\Transaction;
+use App\Models\TransactionHist;
+use Illuminate\Support\Facades\Auth;
+class TransactionObserver
+{
+    public function updated(Transaction $transaction): void
+    {
+        TransactionHist::create([
+            'code' => $transaction->id_transaction,
+            'operation' => 'update',
+            'data' => [
+                'before' => $transaction->getOriginal(),
+                'after' => $transaction->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(Transaction $transaction): void
+    {
+        TransactionHist::create([
+            'code' => $transaction->id_transaction,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $transaction->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}
+===== app/Observers/UserObserver.php
+<?php
+
+namespace App\Observers;
+
+use App\Models\User;
+use App\Models\UserHist;
+use Illuminate\Support\Facades\Auth;
+class UserObserver
+{
+    public function updated(User $user): void
+    {
+        UserHist::create([
+            'code' => $user->email,
+            'operation' => 'update',
+            'data' => [
+                'before' => $user->getOriginal(),
+                'after' => $user->getChanges(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    public function deleted(User $user): void
+    {
+        UserHist::create([
+            'code' => $user->email,
+            'operation' => 'delete',
+            'data' => [
+                'before' => $user->toArray(),
+            ],
+            'user_id' => Auth::id(),
+        ]);
+    }
+}

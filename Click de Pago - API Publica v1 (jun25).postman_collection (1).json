@@ -1,0 +1,1650 @@
+{
+  "info": {
+    "name": "Click de Pago - API Publica v1 (Manual jun25)",
+    "description": "Coleccion armada sobre el Manual de Integracion API Publica - Click de Pago (jun25, ult. modif. 09/12/2024).\n\n## Como usar\n1. Cargar `guid` y `frase` en las variables de la coleccion (pestana Variables).\n2. Correr **Health Check** para confirmar que el host responde.\n3. Listo: un pre-request script a nivel coleccion pide el token a `/sesion` automaticamente y lo renueva cuando vence. No hace falta pegar bearers a mano.\n\n## Ambientes\n- Sandbox (dominio actual): `https://sandboxpp.macroclickpago.com.ar:8082/v1`\n- Sandbox (dominio del manual, puede estar dado de baja): `https://sandboxpp.asjservicios.com.ar:8082/v1`\n- Produccion: `https://botonpp.asjservicios.com.ar:8082/v1`\n\nCambiar la variable `baseUrl` para saltar entre ambientes.\n\n## Convenciones del manual\n- **Montos**: string, las ultimas dos posiciones son decimales. $6.573,40 -> `\"657340\"`.\n- **Fechas**: `dd/MM/yyyy` (salvo `due_date` de link-pago, que va `yyyy-MM-dd`).\n- **Respuestas**: todas siguen el esquema `{status, code, message, data}` (excepto `/link-pago`, que devuelve `{transaction_id, url}`).\n- El recurso es **order** (ingles). `ordenId` solo existe como query param.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// ---------------------------------------------------------------",
+          "// Auto-login: si no hay token o esta vencido, pide uno a /sesion",
+          "// Se saltea en Health Check y en Autenticacion (no llevan bearer)",
+          "// ---------------------------------------------------------------",
+          "const skip = [\"Health Check\", \"Obtener token de sesion\"];",
+          "if (skip.includes(pm.info.requestName)) { return; }",
+          "",
+          "function tokenVigente() {",
+          "    const t = pm.collectionVariables.get(\"token\");",
+          "    if (!t) { return false; }",
+          "    try {",
+          "        const payload = JSON.parse(atob(t.split(\".\")[1]));",
+          "        // margen de 60s para evitar carreras",
+          "        return (payload.exp * 1000) > (Date.now() + 60000);",
+          "    } catch (e) { return false; }",
+          "}",
+          "",
+          "if (!tokenVigente()) {",
+          "    console.log(\"Token ausente o vencido -> solicitando /sesion\");",
+          "    pm.sendRequest({",
+          "        url: pm.collectionVariables.get(\"baseUrl\") + \"/sesion\",",
+          "        method: \"POST\",",
+          "        header: { \"Content-Type\": \"application/json\" },",
+          "        body: {",
+          "            mode: \"raw\",",
+          "            raw: JSON.stringify({",
+          "                guid: pm.collectionVariables.get(\"guid\"),",
+          "                frase: pm.collectionVariables.get(\"frase\")",
+          "            })",
+          "        }",
+          "    }, function (err, res) {",
+          "        if (err) { console.error(\"Fallo el login:\", err); return; }",
+          "        const body = res.json();",
+          "        if (body && body.data) {",
+          "            pm.collectionVariables.set(\"token\", body.data);",
+          "            if (body.secretKey) { pm.collectionVariables.set(\"secretKey\", body.secretKey); }",
+          "            console.log(\"Token renovado OK\");",
+          "        } else {",
+          "            console.error(\"No se pudo obtener token:\", JSON.stringify(body));",
+          "        }",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://sandboxpp.macroclickpago.com.ar:8082/v1",
+      "type": "string",
+      "description": "Base URL del ambiente activo"
+    },
+    {
+      "key": "baseUrlSandboxManual",
+      "value": "https://sandboxpp.asjservicios.com.ar:8082/v1",
+      "type": "string",
+      "description": "Dominio de sandbox segun el manual jun25"
+    },
+    {
+      "key": "baseUrlProd",
+      "value": "https://botonpp.asjservicios.com.ar:8082/v1",
+      "type": "string",
+      "description": "Base URL de produccion"
+    },
+    {
+      "key": "guid",
+      "value": "",
+      "type": "string",
+      "description": "Identificador del comercio (lo entrega Click de Pago)"
+    },
+    {
+      "key": "frase",
+      "value": "",
+      "type": "string",
+      "description": "Frase secreta del comercio (la entrega Click de Pago)"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT - se completa solo via /sesion"
+    },
+    {
+      "key": "secretKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "codigoCaja",
+      "value": "C36",
+      "type": "string"
+    },
+    {
+      "key": "cajaId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "numeroSucursal",
+      "value": "0000000000",
+      "type": "string"
+    },
+    {
+      "key": "ordenId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idTransaccionInterno",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transaccionComercioId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "xToken",
+      "value": "",
+      "type": "string",
+      "description": "Token de pago - se completa solo via /tokens"
+    },
+    {
+      "key": "ipCliente",
+      "value": "::1",
+      "type": "string"
+    },
+    {
+      "key": "urlNotificacion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "linkPagoUrl",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "linkTransactionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idLiquidacion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "qrCaja",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Estado y Sesion",
+      "description": "Health check y obtencion del JWT. Ninguno de los dos lleva bearer.",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Manual 1.2.0. Sin auth. Sirve para verificar que el host y el puerto estan bien antes de sospechar de credenciales.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Servicio disponible (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener token de sesion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sesion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sesion"
+              ]
+            },
+            "description": "Manual 1.2.1. Devuelve el JWT en `data`. El test lo guarda en {{token}} automaticamente. Ojo con las comillas tipograficas al copiar el guid.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guid\": \"{{guid}}\",\n  \"frase\": \"{{frase}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Identificacion correcta (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"Devuelve JWT en data\", function () {",
+                  "    pm.expect(j.data).to.be.a(\"string\").and.to.include(\".\");",
+                  "});",
+                  "if (j.data) {",
+                  "    pm.collectionVariables.set(\"token\", j.data);",
+                  "    console.log(\"Token guardado en {{token}}\");",
+                  "}",
+                  "if (j.secretKey) { pm.collectionVariables.set(\"secretKey\", j.secretKey); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Transacciones",
+      "description": "Manual 1.2.2. Consulta de transacciones y su estado.",
+      "item": [
+        {
+          "name": "Listar transacciones (por fecha)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions?FechaDesde=01/01/2026&FechaHasta=31/12/2026&EstadoTransaccion=3&NumeroSucursal={{numeroSucursal}}&Caja={{codigoCaja}}&Pagina=1&Cantidad=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "FechaDesde",
+                  "value": "01/01/2026"
+                },
+                {
+                  "key": "FechaHasta",
+                  "value": "31/12/2026"
+                },
+                {
+                  "key": "EstadoTransaccion",
+                  "value": "3",
+                  "disabled": true,
+                  "description": "1 CREADA, 2 EN_PAGO, 3 REALIZADA, 4 RECHAZADA, 5/6 ERROR_HASH, 7 EXPIRADA, 8 CANCELADA, 9 DEVUELTA, 10 PENDIENTE, 11 VENCIDA"
+                },
+                {
+                  "key": "NumeroSucursal",
+                  "value": "{{numeroSucursal}}",
+                  "disabled": true
+                },
+                {
+                  "key": "Caja",
+                  "value": "{{codigoCaja}}",
+                  "disabled": true
+                },
+                {
+                  "key": "Pagina",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "Cantidad",
+                  "value": "50",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Manual 1.2.2 (1). Obligatorio filtrar por FechaDesde/FechaHasta (dd/MM/yyyy) O por TransaccionComercioId. Filtros opcionales: TransaccionId, EstadoTransaccion, NumeroSucursal, Caja, Pagina, Cantidad."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar transacciones (por TransaccionComercioId)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions?TransaccionComercioId={{transaccionComercioId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "TransaccionComercioId",
+                  "value": "{{transaccionComercioId}}"
+                }
+              ]
+            },
+            "description": "Misma ruta, filtrando por el ID interno del comercio."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de una transaccion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transaction/{{transaccionComercioId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transaction",
+                "{{transaccionComercioId}}"
+              ]
+            },
+            "description": "Manual 1.2.2 (2). El path param es el ID interno del comercio."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar transaccion por OrdenId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transaction/search?ordenId={{ordenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transaction",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "ordenId",
+                  "value": "{{ordenId}}"
+                }
+              ]
+            },
+            "description": "Manual 1.2.2 (3). Enviar SOLO uno de los dos query params. Si van los dos, prevalece identificadorTransaccionInterno."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar transaccion por IdTransaccionInterno",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transaction/search?identificadorTransaccionInterno={{idTransaccionInterno}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transaction",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "identificadorTransaccionInterno",
+                  "value": "{{idTransaccionInterno}}"
+                }
+              ]
+            },
+            "description": "Manual 1.2.2 (3). Variante por identificador interno de la orden."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Medios de Pago",
+      "item": [
+        {
+          "name": "Listar medios de pago habilitados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payment-methods",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment-methods"
+              ]
+            },
+            "description": "Manual 1.2.3. Devuelve `data` como STRING con JSON adentro (hay que hacer doble parse). Trae MedioPagoId, Nombre, Descripcion, TipoPago, Cuotas, LongitudCVV."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});",
+                  "// data viene como string escapado: doble parse",
+                  "try {",
+                  "    const medios = JSON.parse(pm.response.json().data);",
+                  "    console.log(\"Medios habilitados: \" + medios.map(m => m.MedioPagoId + \"=\" + m.Nombre).join(\", \"));",
+                  "} catch (e) { console.log(\"No se pudo parsear data\"); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Cajas",
+      "description": "Manual 1.2.4. Una caja es el contenedor de las ordenes de pago. Fixed_Amount=true para operar con ordenes.",
+      "item": [
+        {
+          "name": "Crear caja",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/caja",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "caja"
+              ]
+            },
+            "description": "Manual 1.2.4. Un 403 aca significa que hay que pedir acceso al servicio a Click de Pago. El test guarda el codigo en {{codigoCaja}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Codigo\": \"C36\",\n  \"Fixed_Amount\": true,\n  \"Nombre\": \"Caja C36\",\n  \"NumeroSucursal\": \"{{numeroSucursal}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Caja creada (201)\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "if (j.data && j.data.codigo) {",
+                  "    pm.collectionVariables.set(\"codigoCaja\", j.data.codigo);",
+                  "    pm.collectionVariables.set(\"cajaId\", String(j.data.cajaId));",
+                  "    console.log(\"codigoCaja guardado: \" + j.data.codigo);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar caja por codigo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/caja?codigo={{codigoCaja}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "caja"
+              ],
+              "query": [
+                {
+                  "key": "codigo",
+                  "value": "{{codigoCaja}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar caja por cajaId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/caja?cajaId={{cajaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "caja"
+              ],
+              "query": [
+                {
+                  "key": "cajaId",
+                  "value": "{{cajaId}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar caja por codigo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/caja?codigo={{codigoCaja}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "caja"
+              ],
+              "query": [
+                {
+                  "key": "codigo",
+                  "value": "{{codigoCaja}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar caja por cajaId",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/caja?cajaId={{cajaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "caja"
+              ],
+              "query": [
+                {
+                  "key": "cajaId",
+                  "value": "{{cajaId}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Ordenes de Pago",
+      "description": "Manual 1.2.4. OJO: el recurso es `order` en ingles. `ordenId` es query param, nunca segmento de ruta. En POST/GET/DELETE `/order/{codigoCaja}` el path param es el CODIGO DE CAJA, no el id de la orden.",
+      "item": [
+        {
+          "name": "Generar orden de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Ttl-Preference",
+                "value": "600",
+                "disabled": true,
+                "description": "TTL de la orden en segundos"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/order/{{codigoCaja}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                "{{codigoCaja}}"
+              ]
+            },
+            "description": "Manual 1.2.4. MontoTotal en string con los 2 ultimos digitos como decimales ($6.573,40 -> \"657340\"). UrlNotificacion vacia = usa la configurada al dar de alta el comercio. Header X-Ttl-Preference (opcional, segundos) viene deshabilitado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MontoTotal\": \"657340\",\n  \"IdTransaccionInterno\": \"9484046301\",\n  \"Productos\": \"2025-121-000001275\",\n  \"UrlNotificacion\": \"{{urlNotificacion}}\",\n  \"NombreProducto\": [\n    \"2025-121-000001275\"\n  ],\n  \"MontoProducto\": [\n    \"657340\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Orden creada (201)\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"Devuelve ordenId\", function () {",
+                  "    pm.expect(j.data).to.have.property(\"ordenId\");",
+                  "});",
+                  "if (j.data && j.data.ordenId) {",
+                  "    pm.collectionVariables.set(\"ordenId\", String(j.data.ordenId));",
+                  "    console.log(\"ordenId guardado: \" + j.data.ordenId);",
+                  "}",
+                  "if (j.data && j.data.qrCaja) {",
+                  "    pm.collectionVariables.set(\"qrCaja\", j.data.qrCaja);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar orden por ordenId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order?ordenId={{ordenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order"
+              ],
+              "query": [
+                {
+                  "key": "ordenId",
+                  "value": "{{ordenId}}"
+                }
+              ]
+            },
+            "description": "Manual 1.2.4. Estados: 1 PENDIENTE, 2 APROBADA, 3 RECHAZADA, 4 EXPIRADA."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar orden por idTransaccionInterno",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order?idTransaccionInterno={{idTransaccionInterno}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order"
+              ],
+              "query": [
+                {
+                  "key": "idTransaccionInterno",
+                  "value": "{{idTransaccionInterno}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar orden vigente de una caja",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order/{{codigoCaja}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                "{{codigoCaja}}"
+              ]
+            },
+            "description": "Manual 1.2.4. Devuelve la orden PENDIENTE de esa caja."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar orden por ordenId",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order?ordenId={{ordenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order"
+              ],
+              "query": [
+                {
+                  "key": "ordenId",
+                  "value": "{{ordenId}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar orden por idTransaccionInterno",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order?idTransaccionInterno={{idTransaccionInterno}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order"
+              ],
+              "query": [
+                {
+                  "key": "idTransaccionInterno",
+                  "value": "{{idTransaccionInterno}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar orden vigente de una caja",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/order/{{codigoCaja}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "order",
+                "{{codigoCaja}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Links de Pago",
+      "description": "Manual 1.2.12. Es la unica via documentada con retorno del usuario a tu sitio: `back_url` (redireccion) y `notification_url` (webhook). Reemplaza a los CallbackSucces/CallbackCancel del boton clasico.",
+      "item": [
+        {
+          "name": "Crear link de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/link-pago",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "link-pago"
+              ]
+            },
+            "description": "Manual 1.2.12. `due_date` en formato yyyy-MM-dd y no puede superar las 72hs. `total` int, ultimos 2 digitos = decimales. `external_reference` debe ser unico por comercio. Respuesta: {transaction_id, url} - NO sigue el esquema status/code/message.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_request\": {\n    \"description\": \"Boleta 2025-121-000001275\",\n    \"due_date\": \"2026-08-26\",\n    \"total\": 657340,\n    \"payer_name\": \"Contribuyente de prueba\",\n    \"external_reference\": \"9484046301\",\n    \"back_url\": \"https://mrboletas.resistencia.gob.ar/MRBoletas/servlet/com.mrboletas.returnunmacro\",\n    \"notification_url\": \"https://mrboletas.resistencia.gob.ar/MRBoletas/servlet/com.mrboletas.notificacion\"\n  },\n  \"numeroSucursal\": \"{{numeroSucursal}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Link generado (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"Devuelve url del link de pago\", function () {",
+                  "    pm.expect(j).to.have.property(\"url\");",
+                  "});",
+                  "if (j.transaction_id) {",
+                  "    pm.collectionVariables.set(\"linkTransactionId\", String(j.transaction_id));",
+                  "}",
+                  "if (j.url) {",
+                  "    pm.collectionVariables.set(\"linkPagoUrl\", j.url);",
+                  "    console.log(\"Link de pago: \" + j.url);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - QR Dinamico",
+      "description": "Manual 1.2.9 y 1.2.10. El body es un ARRAY de objetos (generacion masiva).",
+      "item": [
+        {
+          "name": "Generar QRs masivos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/qr",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "qr"
+              ]
+            },
+            "description": "Manual 1.2.9. Array de objetos. FechaVencimiento dd/MM/yyyy. Devuelve un array con transaccionComercioId, qr (payload EMV) y qrId.",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"Producto\": \"Factura 1-111\",\n    \"Monto\": \"103400\",\n    \"TransaccionComercioId\": \"abc123\",\n    \"Sucursal\": \"{{numeroSucursal}}\",\n    \"Caja\": \"{{codigoCaja}}\",\n    \"FechaVencimiento\": \"12/09/2026\",\n    \"Informacion\": [\n      {\n        \"campo1\": \"00005528\",\n        \"descripcion\": \"Derecho de busqueda\",\n        \"monto\": \"15000\",\n        \"desc_campo\": \"Descripcion_campo\",\n        \"cod_barra\": \"56715300220000879896177000000000022011200000150005\"\n      }\n    ]\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"QR generados (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"data es un array de QRs\", function () {",
+                  "    pm.expect(j.data).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generar QRs masivos - multiples vencimientos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/qr-vencimientos-multiples",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "qr-vencimientos-multiples"
+              ]
+            },
+            "description": "Manual 1.2.10. Igual al anterior mas Fecha/Monto de segundo y tercer vencimiento.",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"Producto\": \"Factura 1-111\",\n    \"Monto\": \"103400\",\n    \"TransaccionComercioId\": \"abc123\",\n    \"Sucursal\": \"{{numeroSucursal}}\",\n    \"Caja\": \"{{codigoCaja}}\",\n    \"FechaVencimiento\": \"12/09/2026\",\n    \"Informacion\": [\n      {\n        \"campo1\": \"00005528\",\n        \"descripcion\": \"Derecho de busqueda\",\n        \"monto\": \"15000\",\n        \"desc_campo\": \"Descripcion_campo\",\n        \"cod_barra\": \"56715300220000879896177000000000022011200000150005\"\n      }\n    ],\n    \"FechaSegundoVencimiento\": \"21/09/2026\",\n    \"FechaTercerVencimiento\": \"30/09/2026\",\n    \"MontoSegundoVencimiento\": \"113400\",\n    \"MontoTercerVencimiento\": \"123400\"\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"QR generados (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"data es un array de QRs\", function () {",
+                  "    pm.expect(j.data).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Pago con Tarjeta (2 pasos)",
+      "description": "Manual 1.2.7 y 1.2.8. Flujo en dos pasos: /tokens devuelve un GUID que se envia como header X-Token en /payment. Correr en orden.",
+      "item": [
+        {
+          "name": "Paso 1 - Obtener token de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tokens"
+              ]
+            },
+            "description": "Manual 1.2.7. `Comercio` es el GUID del comercio (el manual lo rotula como CUIT pero el ejemplo es un GUID). TotalOperacion en string. El test guarda el resultado en {{xToken}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Comercio\": \"{{guid}}\",\n  \"SucursalComercio\": null,\n  \"Productos\": \"\",\n  \"TotalOperacion\": \"657340\",\n  \"TransaccionComercioId\": \"9484046301\",\n  \"Ip\": \"{{ipCliente}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Token de pago generado (200)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test(\"data trae el GUID del token de pago\", function () {",
+                  "    pm.expect(j.data).to.be.a(\"string\");",
+                  "});",
+                  "if (j.data) {",
+                  "    pm.collectionVariables.set(\"xToken\", j.data);",
+                  "    console.log(\"X-Token guardado: \" + j.data);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paso 2 - Ejecutar pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{xToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment"
+              ]
+            },
+            "description": "Manual 1.2.8. Requiere header X-Token del paso 1. Tarjetas de prueba en la seccion 2 del manual, todas con vto 08/30 y CVV 123. Ej.: 4500000000000007 (Visa credito, cualquier monto), 4092300000000005 (Visa debito, rechaza > $65000 por fondos insuficientes). 404 aca = el token de pago no existe; 401 = expiro.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"DatosTarjeta\": {\n    \"AñoVencimiento\": \"30\",\n    \"MesVencimiento\": \"08\",\n    \"CodigoTarjeta\": \"123\",\n    \"DocumentoTitular\": \"25123456\",\n    \"Email\": \"test@test.com\",\n    \"FechaNacimientoTitular\": \"12031993\",\n    \"NumeroPuertaResumen\": \"20\",\n    \"NumeroTarjeta\": \"4500000000000007\",\n    \"TipoDocumento\": \"DNI\",\n    \"TitularTarjeta\": \"Juan de los Palotes\"\n  },\n  \"AceptaHabeasData\": false,\n  \"AceptTerminosyCondiciones\": true,\n  \"CantidadCuotas\": 1,\n  \"IPCliente\": \"{{ipCliente}}\",\n  \"MedioPagoId\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 - Pago con DEBIN",
+      "item": [
+        {
+          "name": "Generar DEBIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/debin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "debin"
+              ]
+            },
+            "description": "Manual 1.2.6. CBU o alias: al menos uno es obligatorio. Datos de prueba del manual (seccion 2): cbu 0110482420048200036238, alias debin.prueba.1, cuit 30707743987.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cuit\": \"30707743987\",\n  \"cbu\": null,\n  \"alias\": \"debin.prueba.1\",\n  \"email\": \"ejemplo@gmail.com\",\n  \"monto\": \"500000\",\n  \"transaccionComercioId\": \"debin123\",\n  \"productos\": [\n    \"debin\"\n  ],\n  \"montoProducto\": [\n    \"500000\"\n  ],\n  \"SucursalComercio\": null,\n  \"codigoCaja\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 - Devoluciones",
+      "item": [
+        {
+          "name": "Anular / devolver una transaccion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "refund"
+              ]
+            },
+            "description": "Manual 1.2.5. La transaccion debe estar en estado REALIZADA. Dispara mail al comercio y un POST a la URL de notificacion. EstadoDevolucion: 1 PENDIENTE_APROBACION, 2 APROBADA, 3 NO_APROBADA, 4 RECHAZADA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaccionComercioId\": \"{{transaccionComercioId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 - Liquidaciones",
+      "item": [
+        {
+          "name": "Listar liquidaciones por fecha",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/liquidaciones?dateLiquidacion=01/08/2026",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "liquidaciones"
+              ],
+              "query": [
+                {
+                  "key": "dateLiquidacion",
+                  "value": "01/08/2026"
+                }
+              ]
+            },
+            "description": "Manual 1.2.11. Fecha en dd/MM/yyyy. De aca sale el liquidacionEnteId que necesita el detalle."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "if (j.liquidaciones && j.liquidaciones.length) {",
+                  "    pm.collectionVariables.set(\"idLiquidacion\", String(j.liquidaciones[0].liquidacionEnteId));",
+                  "    console.log(\"idLiquidacion guardado: \" + j.liquidaciones[0].liquidacionEnteId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de una liquidacion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/liquidaciones/detalle?idliquidacion={{idLiquidacion}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "liquidaciones",
+                "detalle"
+              ],
+              "query": [
+                {
+                  "key": "idliquidacion",
+                  "value": "{{idLiquidacion}}"
+                }
+              ]
+            },
+            "description": "Manual 1.2.11. El query param va en minusculas: `idliquidacion`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code 2xx\", function () {",
+                  "    pm.expect(pm.response.code).to.be.within(200, 299);",
+                  "});",
+                  "pm.test(\"Esquema de respuesta Click de Pago\", function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property(\"status\");",
+                  "    pm.expect(j).to.have.property(\"code\");",
+                  "    pm.expect(j).to.have.property(\"message\");",
+                  "});",
+                  "pm.test(\"status = true\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

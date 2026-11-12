@@ -5,6 +5,18 @@
       "args": [
         "mcp"
       ]
+    },
+    "clickdepago": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "clickdepago-mcp-server@1.0.0"
+      ],
+      "env": {
+        "CLICKDEPAGO_GUID": "${CLICKDEPAGO_GUID:-}",
+        "CLICKDEPAGO_FRASE": "${CLICKDEPAGO_FRASE:-}",
+        "CLICKDEPAGO_SANDBOX": "true"
+      }
     }
   }
 }
