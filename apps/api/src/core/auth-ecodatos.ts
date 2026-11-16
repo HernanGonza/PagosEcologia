@@ -23,6 +23,8 @@ export interface SesionPanel {
   modulos: ModuloPanel[];
   /** Claves de las áreas de Ecodatos a las que pertenece (ej. 'recaudaciones'). */
   areas: string[];
+  /** De esas áreas, en cuáles puede actuar (no solo mirar). */
+  areasEditor: string[];
 }
 
 declare module 'express-serve-static-core' {
@@ -104,6 +106,7 @@ export async function permisosDeUsuario(id: string, email: string): Promise<Sesi
     usuario: { id, email, nombre: perfil.rows[0]?.full_name ?? null, esAdmin },
     modulos: accesibles,
     areas: areas.rows.map((a) => a.key),
+    areasEditor: areas.rows.filter((a) => a.es_editor).map((a) => a.key),
   };
 }
 
@@ -169,6 +172,18 @@ export function requierePanel(slug: string, { edicion = false } = {}) {
 
 /** Área de Ecodatos cuyos integrantes ven el panel financiero (el mismo criterio que la función SQL `recaudacion_puede_ver`). */
 export const AREA_RECAUDACIONES = 'recaudaciones';
+
+/** ¿Puede cambiar cosas en Recaudaciones (tarifas) y no solo mirar? Admin/superadmin, o integrante del área con es_editor. */
+export const puedeEditarRecaudaciones = (s: SesionPanel) => s.usuario.esAdmin || s.areasEditor.includes(AREA_RECAUDACIONES);
+
+/** Exige poder editar en Recaudaciones (va después de requiereRecaudaciones). */
+export function requiereEdicionRecaudaciones(req: Request, res: Response, next: NextFunction) {
+  if (!puedeEditarRecaudaciones(req.sesionPanel!)) {
+    res.status(403).json({ error: 'Tu usuario tiene acceso de solo lectura en Recaudaciones.' });
+    return;
+  }
+  next();
+}
 
 /** Panel financiero: admin o superadmin de Ecodatos, o integrante del área Recaudaciones. */
 export function requiereRecaudaciones(req: Request, res: Response, next: NextFunction) {

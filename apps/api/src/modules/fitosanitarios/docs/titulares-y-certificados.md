@@ -306,7 +306,7 @@ Las fases 1 a 3 se pueden hacer sin que exista el pago. La 4 en adelante necesit
    - Los restos del primer diseño se eliminaron: `pagos.fito_renovaciones` y la tarifa `renovacion-anual` (migración 0011), y el endpoint `GET /certificados/:identificador`. También se quitó `GET /tarifa` (leía `renovacion-anual` y no lo usaba ningún front).
 2. **Otros documentos que vencen:** la VTV está confirmada; faltan los demás (seguro, habilitación municipal…). Cuando se sepan, hay que marcarlos con campo de vencimiento. Mientras no se marquen, no se consideran vencidos y no mandan la renovación a revisión.
 3. **QR:** datos confirmados (4.6): número, tipo, objeto (para un vehículo, la **patente**), vigencia, estado y nombre del titular; para vehículos, también el **vencimiento de la VTV**. Nada más.
-4. **Tasas:** se editan desde el **panel financiero**. Falta definir qué usuarios de Recaudaciones tienen permiso y si hay descuento por renovar varios certificados a la vez.
+4. **Tasas:** se editan desde el **panel financiero**. Falta definir qué usuarios de Recaudaciones tienen permiso. **No hay descuento por pagar o renovar varios a la vez** (decidido 2026-11-16: son trámites, no una venta): el total es siempre la suma de las tasas.
 
 ---
 
@@ -380,7 +380,7 @@ Todo lo de abajo **se probó de punta a punta** contra la base local (alta de un
 
 - **El pago** (MacroClick): sigue sin implementarse. Ahí hay que llamar a `emitirCertificado` cuando el pago se confirme, sumar las tasas de varias renovaciones en una orden y guardar `orden_id` en la solicitud y el certificado.
 - **Login y permisos del panel financiero** (quién de Recaudaciones puede cambiar tasas).
-- **Descuento** por renovar varios a la vez (sin definir).
+- ~~Descuento por renovar varios a la vez~~: **decidido que no hay** (son trámites, no una venta).
 - **Otros documentos que vencen** (seguro, habilitación): marcar `venceEn` en esos requisitos cuando se sepan.
 - **Mail al emitir** con el certificado (hoy el mail de "pago recibido/emitido" lo hará el flujo de pago).
 - Diseño final del PDF del certificado.

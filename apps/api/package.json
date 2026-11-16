@@ -10,7 +10,8 @@
     "fitosanitarios:tareas": "tsx --env-file-if-exists=../../.env src/modules/fitosanitarios/tareas.ts",
     "consultores:tareas": "tsx --env-file-if-exists=../../.env src/modules/consultores/tareas.ts",
     "reservas:tareas": "tsx --env-file-if-exists=../../.env src/modules/reservas/tareas.ts",
-    "clave-botonera": "tsx --env-file-if-exists=../../.env scripts/clave-botonera.ts"
+    "clave-botonera": "tsx --env-file-if-exists=../../.env scripts/clave-botonera.ts",
+    "pagos:conciliar": "tsx --env-file-if-exists=../../.env src/core/conciliar-pagos.ts"
   },
   "dependencies": {
     "@botonera/shared": "*",

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Home from './pages/Home';
 import NoEncontrada from './pages/NoEncontrada';
+import Cookies from './pages/Cookies';
+import PagoRetorno from './pages/PagoRetorno';
 import { SoloSiActivo } from './lib/modulos-activos';
 import './index.css';
 
@@ -26,6 +28,9 @@ createRoot(document.getElementById('root')!).render(
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/cookies" element={<Cookies />} />
+          {/* A donde vuelve el contribuyente del checkout del banco: solo muestra el estado. */}
+          <Route path="/pagar/retorno" element={<PagoRetorno />} />
           <Route path="/pagar/fitosanitarios" element={<SoloSiActivo slug="fitosanitarios"><Fitosanitarios /></SoloSiActivo>} />
           <Route path="/pagar/fitosanitarios/solicitud" element={<SoloSiActivo slug="fitosanitarios"><FitosanitariosSolicitud /></SoloSiActivo>} />
           <Route path="/pagar/fitosanitarios/mis-certificados" element={<SoloSiActivo slug="fitosanitarios"><FitosanitariosMisCertificados /></SoloSiActivo>} />

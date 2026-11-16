@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "graft": {
+      "command": "graft",
+      "args": [
+        "mcp"
+      ]
+    },
+    "clickdepago": {
+      "command": "node",
+      "args": [
+        "/home/hernan/Escritorio/Ecologia/botonera-pagos/node_modules/clickdepago-mcp-server/dist/index.js"
+      ],
+      "env": {
+        "CLICKDEPAGO_GUID": "<GUID de la cuenta, ver .env PAGOS_FITOSANITARIO_GUID>",
+        "CLICKDEPAGO_FRASE": "<frase de la cuenta, ver .env PAGOS_FITOSANITARIO_FRASE>",
+        "CLICKDEPAGO_SANDBOX": "true"
+      }
+    }
+  }
+}

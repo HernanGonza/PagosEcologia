@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { TarifaVersionAdmin, TramiteAdmin } from '@botonera/shared';
 import { DashboardCard, DetailHeader, DetailTag } from '@/components/watermelon/capitalio-dashboard/components/capitalio/shared';
 import { formatoPesos, useApi } from '../api';
-import { fetchAutenticado } from '../sesion';
+import { fetchAutenticado, useSesion } from '../sesion';
 import { EstadoCarga, Pagina, Vacio } from '../comunes';
 
 const tipos: Record<string, string> = { simple: 'Simple', consulta: 'Con consulta', complejo: 'Complejo' };
@@ -92,7 +92,9 @@ function CambiarValor({ modulo, concepto, alGuardar }: { modulo: string; concept
 
 function Concepto({ c, modulo, alGuardar }: { c: TramiteAdmin['conceptos'][number]; modulo: string; alGuardar: () => void }) {
   const falta = c.requerido && !c.vigente;
-  const editable = c.vigente ? typeof c.vigente.valor === 'number' : c.requerido;
+  const { estado } = useSesion();
+  const puedeEditar = estado.tipo === 'lista' && estado.usuario.puedeEditar;
+  const editable = puedeEditar && (c.vigente ? typeof c.vigente.valor === 'number' : c.requerido);
   return (
     <div className="flex flex-col gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-2">

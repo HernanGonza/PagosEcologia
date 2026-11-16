@@ -12,6 +12,7 @@ import { emailCanonico, emailValido, normalizarEmail, pedirCodigo, verificarCodi
 import { renovacionSinCambios } from './renovaciones.js';
 import { emitirCertificado, pdfDeCertificado, urlVerificacion } from './certificados.js';
 import { registrarPagoSimulado } from '../../core/pago-simulado.js';
+import { ErrorPago, iniciarPago, registrarEnganchePago } from '../../core/pagos-online.js';
 import { esRepresentante } from './titulares.js';
 import {
   BUCKET,
@@ -39,6 +40,7 @@ import {
   nombreTramite,
   SQL_HOY,
   personaPorSesion,
+  segundosDeSesion,
   solicitudDeLaPersona,
   solicitudPorSesion,
   solicitudPublica,
@@ -132,6 +134,9 @@ async function conSesion(req: Request, res: Response, next: NextFunction) {
       res.status(401).json({ error: 'Tu sesión venció o el enlace ya no vale. Pedí uno nuevo con tu mail.', codigo: 'enlace_invalido' });
       return;
     }
+    // Cuánto le queda a la sesión: el front lo usa para avisar antes de que se cierre.
+    const segundos = await segundosDeSesion(cookie);
+    if (segundos !== null) res.setHeader('X-Sesion-Segundos', String(segundos));
     res.locals.solicitud = s;
     next();
   } catch (e) {
@@ -373,6 +378,23 @@ publicoRouter.post('/sesion', async (req, res, next) => {
   }
 });
 
+/** Renueva la sesión (por inactividad) y dice cuánto le queda. Sirve para sesiones de solicitud y de persona; lo usa "Seguir conectado". */
+publicoRouter.get('/sesion/estado', async (req, res, next) => {
+  try {
+    const cookie = leerCookie(req);
+    const persona = cookie ? await personaPorSesion(cookie) : null;
+    const segundos = persona ? await segundosDeSesion(cookie) : null;
+    if (segundos === null) {
+      res.status(401).json({ error: 'Tu sesión venció o el enlace ya no vale. Pedí uno nuevo con tu mail.', codigo: 'enlace_invalido' });
+      return;
+    }
+    res.setHeader('X-Sesion-Segundos', String(segundos));
+    res.json({ segundos });
+  } catch (e) {
+    next(e);
+  }
+});
+
 publicoRouter.get('/solicitud', conSesion, async (_req, res, next) => {
   try {
     res.json(await solicitudPublica(solicitudDe(res)));
@@ -578,6 +600,83 @@ publicoRouter.post('/solicitud/enviar', conSesion, async (_req, res, next) => {
   }
 });
 
+
+// --- Pago online (Click de Pago) -----------------------------------------------------------------------------
+// El monto lo calcula el servidor: el navegador solo recibe el formulario ya firmado y lo envía al banco.
+// El pago se da por hecho únicamente cuando el aviso del banco se reconfirma con una consulta al banco (core/pagos-online.ts).
+publicoRouter.post('/solicitud/pagar', conSesion, async (req, res, next) => {
+  try {
+    const s = solicitudDe(res);
+    const iniciado = await enTransaccion(async (client) => {
+      const fila = await bloquear(client, s.id);
+      if (fila.estado !== 'aprobada') throw new ErrorSolicitud(409, 'La solicitud tiene que estar aprobada para poder pagarla.');
+      const importe = (await tipoPublico(await configModulo(), fila.tipo)).importeCentavos;
+      try {
+        return await iniciarPago(client, {
+          moduloSlug: MODULO, refId: fila.id, identificador: fila.numero, importeCentavos: importe ?? 0,
+          descripcion: `Tasa - solicitud ${fila.numero}`, ip: ipDe(req), datos: { tipo: fila.tipo },
+        });
+      } catch (e) {
+        if (e instanceof ErrorPago) throw new ErrorSolicitud(e.status, e.message);
+        throw e;
+      }
+    });
+    res.json(iniciado);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Cuando el banco confirma el pago (dentro de la transacción de core/pagos-online.ts): cada solicitud de la orden pasa a
+// pagada y se emite su certificado. Una orden puede traer varias (pago de un lote): cada una va en su propio savepoint, así
+// que una que falle no tira abajo a las demás; el cobro nunca se pierde (la orden queda marcada para revisión).
+registrarEnganchePago(MODULO, {
+  cuentaPorDefecto: 'FITOSANITARIO',
+  async alConfirmarse(client, orden) {
+    const ids = Array.isArray(orden.datos.solicitudes) ? (orden.datos.solicitudes as unknown[]).map(String) : [orden.ref_id ?? ''];
+    const emitidas: { numero: string; certificado: string; venceEn: string; codigo: string; email: string }[] = [];
+    const fallas: string[] = [];
+    for (const id of ids) {
+      await client.query('savepoint solicitud_pagada');
+      try {
+        const fila = await bloquear(client, id);
+        if (fila.estado !== 'aprobada') throw new Error(`la solicitud ${fila.numero} está "${fila.estado}" y no "aprobada"`);
+        await cambiarEstado(client, fila, 'pagada', { actor: 'sistema', nota: `Pago confirmado por Click de Pago (orden ${orden.id}).` });
+        await client.query('update pagos.fito_solicitudes set orden_id = $2 where id = $1', [fila.id, orden.id]);
+        const c = await emitirCertificado(client, { ...fila, estado: 'pagada' }, { actor: 'sistema' });
+        await client.query('release savepoint solicitud_pagada');
+        emitidas.push({ numero: fila.numero, certificado: c.numero, venceEn: c.venceEn, codigo: c.codigoVerificacion, email: fila.email });
+      } catch (e) {
+        await client.query('rollback to savepoint solicitud_pagada');
+        fallas.push(`${id}: ${(e as Error).message}`);
+      }
+    }
+    if (fallas.length === ids.length) throw new Error(fallas.join('; ')); // nada se pudo completar: lo marca el núcleo
+    if (fallas.length) {
+      await client.query('update pagos.ordenes_pago set datos = datos || $2::jsonb where id = $1', [orden.id, JSON.stringify({ requiere_revision: true, fallidas: fallas })]);
+      console.error(`[pagos] orden ${orden.id}: ${fallas.length} de ${ids.length} solicitudes no se pudieron completar: ${fallas.join('; ')}`);
+    }
+    const fecha = (d: string) => d.split('-').reverse().join('/');
+    return () =>
+      avisar({
+        para: emitidas[0].email,
+        asunto: emitidas.length === 1 ? `Solicitud ${emitidas[0].numero}: pago recibido y certificado emitido` : `Recibimos tu pago: ${emitidas.length} certificados emitidos`,
+        titulo: 'Recibimos tu pago',
+        parrafos:
+          emitidas.length === 1
+            ? [
+                `Tu solicitud ${emitidas[0].numero} está paga y el certificado ${emitidas[0].certificado} ya fue emitido (vigente hasta el ${fecha(emitidas[0].venceEn)}).`,
+                'Podés descargarlo volviendo a entrar con tu mail a "Mis certificados". El PDF lleva un código QR para verificar que es auténtico.',
+              ]
+            : [
+                `Recibimos tu pago y se emitieron ${emitidas.length} certificados:`,
+                ...emitidas.map((x) => `${x.certificado} (solicitud ${x.numero}), vigente hasta el ${fecha(x.venceEn)}.`),
+                'Podés descargarlos volviendo a entrar con tu mail a "Mis certificados". Cada PDF lleva un código QR para verificar que es auténtico.',
+              ],
+        boton: emitidas.length === 1 ? { texto: 'Verificar el certificado', url: urlVerificacion(emitidas[0].codigo) } : undefined,
+      });
+  },
+});
 
 // --- Pago SIMULADO (demostración) ---------------------------------------------------------------------------
 // Solo con EMISION_SIMULADA=1 y fuera de producción: reemplaza al checkout de la pasarela para mostrar el circuito

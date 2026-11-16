@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { api, fecha, fechaHora, fijarSolicitud, pesos } from './api';
 import { Aviso, Pagina, Pasos, Tarjeta } from './comunes';
 import { BotonCertificado, BotonPagoSimulado, pagoSimuladoHabilitado } from './PagoSimulado';
+import BotonPagar from '@/components/BotonPagar';
 import { reservas as c } from '@botonera/shared';
 const { etiquetasEstado, formatosDocumento, exigeElPoder, maxBytesDocumento } = c;
 type EstadoSolicitud = c.EstadoSolicitud;
@@ -461,12 +462,7 @@ export default function Solicitud() {
                   {pagoSimuladoHabilitado ? (
                     <BotonPagoSimulado onPagada={setSolicitud} />
                   ) : (
-                    <>
-                      <Button size="lg" className="rounded-lg" disabled>
-                        Pagar la tasa
-                      </Button>
-                      <p className="mt-2 text-sm">El pago en línea se habilita con la integración de MacroClick.</p>
-                    </>
+                    <BotonPagar iniciar={api.pagar} />
                   )}
                 </div>
               </Estado>

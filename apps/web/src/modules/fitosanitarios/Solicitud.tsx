@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { api, fecha, fechaHora, fijarSolicitud, pesos } from './api';
 import { Aviso, Pagina, Pasos, Tarjeta } from './comunes';
 import { BotonCertificado, BotonPagoSimulado, pagoSimuladoHabilitado } from './PagoSimulado';
+import BotonPagar from '@/components/BotonPagar';
 
 const pasoDeEstado: Record<EstadoSolicitud, number> = {
   borrador: 0, observada: 0, enviada: 1, en_revision: 1, aprobada: 2, pagada: 3, emitida: 3, rechazada: 1, vencida: 2,
@@ -465,12 +466,7 @@ export default function Solicitud() {
                   {pagoSimuladoHabilitado ? (
                     <BotonPagoSimulado onPagada={setSolicitud} />
                   ) : (
-                    <>
-                      <Button size="lg" className="rounded-lg" disabled>
-                        Pagar la tasa
-                      </Button>
-                      <p className="mt-2 text-sm">El pago en línea se habilita con la integración de MacroClick.</p>
-                    </>
+                    <BotonPagar iniciar={api.pagar} />
                   )}
                 </div>
               </Estado>

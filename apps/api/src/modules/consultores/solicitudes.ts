@@ -305,6 +305,21 @@ export async function personaPorSesion(cookie: string): Promise<PersonaSesion | 
   return email ? { email, emailCanonico: emailCanonico(email) } : null;
 }
 
+/**
+ * Segundos que le quedan a la sesión de esa cookie: lo que llegue primero entre la inactividad (que ya se renovó
+ * en este mismo pedido) y el máximo total desde que se abrió. Null si no hay sesión vigente.
+ */
+export async function segundosDeSesion(cookie: string): Promise<number | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(cookie)) return null;
+  const { rows } = await pool.query<{ restante: number }>(
+    `select extract(epoch from (created_at + make_interval(mins => $2) - now()))::float8 as restante
+       from pagos.cons_sesiones where cookie_hash = $1`,
+    [hashToken(cookie), SESION_MAXIMO_MINUTOS],
+  );
+  if (!rows[0]) return null;
+  return Math.max(0, Math.floor(Math.min(SESION_INACTIVIDAD_MINUTOS * 60, rows[0].restante)));
+}
+
 /** Cierra la sesión de esa cookie. */
 export async function cerrarSesion(cookie: string) {
   await pool.query('delete from pagos.cons_sesiones where cookie_hash = $1', [hashToken(cookie)]);

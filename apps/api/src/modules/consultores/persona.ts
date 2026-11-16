@@ -6,8 +6,12 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { pool } from '../../db.js';
 import { emailCanonico, emailValido, normalizarEmail, verificarCodigo } from '../../core/verificacion.js';
-import { ErrorSolicitud, PROPOSITO_PERSONA, abrirSesionPersona, cerrarSesion, personaPorSesion, type PersonaSesion } from './solicitudes.js';
-import { clienteDe, leerCookie, ponerCookie } from './publico.js';
+import {
+  ErrorSolicitud, MODULO, PROPOSITO_PERSONA, abrirSesionPersona, bloquear, cerrarSesion, configModulo, enTransaccion, personaPorSesion,
+  segundosDeSesion, solicitudDeLaPersona, tipoPublico, type PersonaSesion,
+} from './solicitudes.js';
+import { ErrorPago, iniciarPago } from '../../core/pagos-online.js';
+import { clienteDe, ipDe, leerCookie, ponerCookie } from './publico.js';
 import { titularesDeMail, titularesPorIds, solicitudesDeTitular, vinculosDe } from './titulares.js';
 import { crearRenovaciones } from './renovaciones.js';
 import { pdfDeCertificado } from './certificados.js';
@@ -24,6 +28,9 @@ async function conPersona(req: Request, res: Response, next: NextFunction) {
       res.status(401).json({ error: 'Tu sesión venció. Volvé a entrar con tu mail.', codigo: 'enlace_invalido' });
       return;
     }
+    // Cuánto le queda a la sesión: el front lo usa para avisar antes de que se cierre.
+    const segundos = await segundosDeSesion(cookie);
+    if (segundos !== null) res.setHeader('X-Sesion-Segundos', String(segundos));
     res.locals.persona = p;
     next();
   } catch (e) {
@@ -70,7 +77,7 @@ personaRouter.get('/mis-titulares', conPersona, async (_req, res, next) => {
           id: t.id, tipoPersona: t.tipo_persona, dni: t.dni, cuit: t.cuit, nombre: t.nombre, telefono: t.telefono, domicilio: t.domicilio,
           creadoEn: t.created_at.toISOString(), objetos: t.objetos,
           // Solo las solicitudes de ESTE mail: las de otros representantes no se ven.
-          misSolicitudes: await solicitudesDeTitular(t.id, p.emailCanonico),
+          misSolicitudes: await conImporte(await solicitudesDeTitular(t.id, p.emailCanonico)),
           representantes: (await vinculosDe(t.id))
             .filter((v) => !v.bajaEn)
             .map((v) => ({ id: v.id, email: ocultarMail(v.email), soyYo: emailCanonico(v.email) === p.emailCanonico, bajaSolicitada: !!v.bajaSolicitadaEn })),
@@ -98,6 +105,73 @@ personaRouter.post('/renovar', conPersona, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body?.certificados) ? req.body.certificados.map(String) : [];
     res.status(201).json(await crearRenovaciones(personaDe(res), ids));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Importe de la tasa de las solicitudes aprobadas (las únicas que se pueden pagar); el resto, null. */
+async function conImporte<T extends { estado: string; tipo: string }>(filas: T[]): Promise<(T & { importeCentavos: number | null })[]> {
+  if (!filas.some((f) => f.estado === 'aprobada')) return filas.map((f) => ({ ...f, importeCentavos: null }));
+  const config = await configModulo();
+  return Promise.all(
+    filas.map(async (f) => {
+      if (f.estado !== 'aprobada') return { ...f, importeCentavos: null };
+      try {
+        return { ...f, importeCentavos: (await tipoPublico(config, f.tipo)).importeCentavos ?? null };
+      } catch {
+        return { ...f, importeCentavos: null };
+      }
+    }),
+  );
+}
+
+/**
+ * Pagar una o varias solicitudes APROBADAS de la persona con una sola orden: el total es la suma de las tasas, calculada
+ * acá (el navegador solo manda los números). Las que siguen en revisión no entran: se pagan después, en otra orden.
+ */
+personaRouter.post('/pagar', conPersona, async (req, res, next) => {
+  try {
+    const p = personaDe(res);
+    const numeros = [...new Set((Array.isArray(req.body?.numeros) ? req.body.numeros : []).map(String))] as string[];
+    if (!numeros.length || numeros.length > 50) throw new ErrorSolicitud(400, 'Elegí entre 1 y 50 solicitudes para pagar.');
+    const iniciado = await enTransaccion(async (client) => {
+      // Solo se resuelven dentro de las solicitudes de este mail; se bloquean por id para no cruzar bloqueos con otro pago.
+      const propias = [];
+      for (const n of numeros) {
+        const s = await solicitudDeLaPersona(p.emailCanonico, n);
+        if (!s) throw new ErrorSolicitud(404, `La solicitud ${n} no existe.`);
+        propias.push(s);
+      }
+      propias.sort((a, b) => (a.id < b.id ? -1 : 1));
+      const config = await configModulo();
+      const lineas: { id: string; numero: string; tipo: string; importeCentavos: number }[] = [];
+      for (const s of propias) {
+        const fila = await bloquear(client, s.id);
+        if (fila.estado !== 'aprobada') throw new ErrorSolicitud(409, `La solicitud ${fila.numero} no está aprobada, así que todavía no se puede pagar.`);
+        const importe = (await tipoPublico(config, fila.tipo)).importeCentavos;
+        if (!importe || importe <= 0) throw new ErrorSolicitud(409, `La solicitud ${fila.numero} no tiene una tarifa cargada: escribinos.`);
+        lineas.push({ id: fila.id, numero: fila.numero, tipo: fila.tipo, importeCentavos: importe });
+      }
+      const total = lineas.reduce((a, l) => a + l.importeCentavos, 0);
+      const unica = lineas.length === 1;
+      try {
+        return await iniciarPago(client, {
+          moduloSlug: MODULO,
+          refId: unica ? lineas[0].id : null,
+          identificador: unica ? lineas[0].numero : `Lote de ${lineas.length}: ${lineas.map((l) => l.numero).join(', ')}`.slice(0, 300),
+          importeCentavos: total,
+          descripcion: unica ? `Tasa - solicitud ${lineas[0].numero}` : `Tasas - ${lineas.length} solicitudes`,
+          ip: ipDe(req),
+          datos: { solicitudes: lineas.map((l) => l.id) },
+          tarifas: lineas,
+        });
+      } catch (e) {
+        if (e instanceof ErrorPago) throw new ErrorSolicitud(e.status, e.message);
+        throw e;
+      }
+    });
+    res.json(iniciado);
   } catch (e) {
     next(e);
   }

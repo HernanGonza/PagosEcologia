@@ -15,6 +15,7 @@ COPY apps/sistema/package.json apps/sistema/
 COPY apps/relevamiento/package.json apps/relevamiento/
 COPY packages/shared/package.json packages/shared/
 COPY packages/marca/package.json packages/marca/
+COPY packages/sesion/package.json packages/sesion/
 RUN npm ci
 
 # ---------- API ----------

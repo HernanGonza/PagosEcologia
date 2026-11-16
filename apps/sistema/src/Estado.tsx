@@ -11,6 +11,7 @@ interface Estado {
   ordenesPendientes: number;
   codigosUltimas24h: number;
   entorno: { produccion: boolean; proveedorPago: string; correo: string; almacenamiento: string; loginLocal: boolean; emisionSimulada: boolean; webUrl: boolean; trustProxy: boolean };
+  conexion?: { trustProxy: string; ipQueUsaLaApi: string | null; conexionDirecta: string | null; xForwardedFor: string | null };
   alertas: string[];
 }
 
@@ -78,6 +79,14 @@ export default function Estado() {
           <Fila k="Archivos (documentos y certificados)" v={e.entorno.almacenamiento} mal={e.entorno.almacenamiento === 'sin configurar'} />
           <Fila k="WEB_URL definida" v={si(e.entorno.webUrl)} />
           <Fila k="TRUST_PROXY definido" v={si(e.entorno.trustProxy)} />
+          {e.conexion && (
+            <>
+              <Fila k="TRUST_PROXY (valor)" v={e.conexion.trustProxy} />
+              <Fila k="Tu IP según la API" v={e.conexion.ipQueUsaLaApi ?? '—'} />
+              <Fila k="Conexión directa a la API (último proxy)" v={e.conexion.conexionDirecta ?? '—'} />
+              <Fila k="X-Forwarded-For recibido" v={e.conexion.xForwardedFor ?? '(vacío)'} />
+            </>
+          )}
           <Fila k="Login local (sin Ecodatos)" v={si(e.entorno.loginLocal)} mal={e.entorno.produccion && e.entorno.loginLocal} />
           <Fila k="Emisión simulada de certificados" v={si(e.entorno.emisionSimulada)} mal={e.entorno.produccion && e.entorno.emisionSimulada} />
         </section>

@@ -5,7 +5,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { createClient, type Session } from '@supabase/supabase-js';
+import { crearSesionEmpleado } from '@botonera/sesion';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -14,12 +14,15 @@ const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const authLocal = import.meta.env.VITE_AUTH_LOCAL === 'true';
 
 export const supabaseConfigurado = authLocal || !!(url && anon);
-const supabase = url && anon ? createClient(url, anon, { auth: { storageKey: 'recaudaciones.sesion' } }) : null;
+// Un solo lugar sabe con qué se inicia sesión (packages/sesion): hoy Ecodatos, mañana el login central.
+const sesionEmpleado = crearSesionEmpleado(url, anon);
 
 export interface UsuarioPanelFinanciero {
   id: string;
   email: string;
   nombre: string | null;
+  /** false = solo lectura (área Recaudaciones sin permiso de edición). */
+  puedeEditar: boolean;
 }
 
 export class ErrorApi extends Error {
@@ -30,8 +33,7 @@ export class ErrorApi extends Error {
 
 /** fetch a la API con el token de la sesión. */
 export async function fetchAutenticado(ruta: string, opciones: RequestInit = {}): Promise<Response> {
-  const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
-  const token = data.session?.access_token;
+  const token = await sesionEmpleado.token();
   return fetch(ruta, { ...opciones, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...opciones.headers } });
 }
 
@@ -53,15 +55,15 @@ const SesionContext = createContext<Sesion | null>(null);
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<Estado>({ tipo: 'cargando' });
 
-  const cargar = useCallback(async (sesion: Session | null) => {
-    if (!sesion) return setEstado({ tipo: 'sin-sesion' });
+  const cargar = useCallback(async (haySesion: boolean) => {
+    if (!haySesion) return setEstado({ tipo: 'sin-sesion' });
     try {
       const res = await fetchAutenticado(`${import.meta.env.VITE_API_BASE ?? '/api'}/admin/yo`);
       if (res.status === 401) {
-        await supabase?.auth.signOut();
+        await sesionEmpleado.salir();
         return setEstado({ tipo: 'sin-sesion' });
       }
-      if (res.status === 403) return setEstado({ tipo: 'sin-permiso', email: sesion.user?.email ?? '' });
+      if (res.status === 403) return setEstado({ tipo: 'sin-permiso', email: await sesionEmpleado.email() });
       if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Error ${res.status}`);
       setEstado({ tipo: 'lista', usuario: (await res.json()) as UsuarioPanelFinanciero });
     } catch (e) {
@@ -71,25 +73,21 @@ export function SesionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authLocal) {
-      cargar({} as Session);
+      cargar(true);
       return;
     }
-    if (!supabase) return setEstado({ tipo: 'sin-sesion' });
-    supabase.auth.getSession().then(({ data }) => cargar(data.session));
-    const { data } = supabase.auth.onAuthStateChange((evento, sesion) => {
-      if (evento === 'SIGNED_IN' || evento === 'SIGNED_OUT') cargar(sesion);
-    });
-    return () => data.subscription.unsubscribe();
+    if (!sesionEmpleado.configurado) return setEstado({ tipo: 'sin-sesion' });
+    sesionEmpleado.haySesion().then(cargar);
+    // Solo al iniciar o cerrar sesión: renovar el token no cambia los permisos.
+    return sesionEmpleado.alCambiar(cargar);
   }, [cargar]);
 
   const entrar = useCallback(async (email: string, clave: string) => {
-    if (!supabase) throw new Error('Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-    const { error } = await supabase.auth.signInWithPassword({ email, password: clave });
-    if (error) throw new Error(/invalid login credentials/i.test(error.message) ? 'El mail o la contraseña no son correctos.' : error.message);
+    await sesionEmpleado.ingresar(email, clave);
   }, []);
 
   const salir = useCallback(async () => {
-    await supabase?.auth.signOut();
+    await sesionEmpleado.salir();
     setEstado({ tipo: 'sin-sesion' });
   }, []);
 

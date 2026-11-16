@@ -26,7 +26,7 @@ commiteado ni corrido en el servidor**. **El pago NO está implementado.**
 
 ## Qué falta
 - **El pago** (MacroClick): llamar a `emitirCertificado`, sumar tasas de varias renovaciones en una orden, guardar `orden_id`, mail de emitido.
-- Login del panel financiero y permisos de Recaudaciones; descuento por renovar varios.
+- Login del panel financiero y permisos de Recaudaciones; (no hay descuento por renovar varios: decidido 2026-11-16).
 - Otros documentos que vencen (seguro, habilitación); diseño final del PDF; retención del registro de consultas; mail al resolver una baja.
 - Formularios y requisitos son **provisorios** hasta que Control Ambiental los confirme.
 

@@ -26,12 +26,12 @@ Resumen de lo trabajado con Claude Code. Cada módulo tiene además su bitácora
 - Esquema `public` = Ecodatos (las migraciones las corre el dueño; no reescribir las ya aplicadas). Esquema `pagos` = nuevo, se puede cambiar.
 
 ## Decisiones abiertas
-- Fila real de `fitosanitarios_domisanitarios_rows.json` que hace abortar la 0010 (¿borrar o migrar?). ¿`git rm` del JSON (dump con user_id)? `formulario_id` y columnas obligatorias de Ecodatos para que los objetos de la botonera aparezcan en su plataforma.
+- ~~Fila real que abortaba la 0010~~ resuelto: la 0010 ya está aplicada en Ecodatos. ~~`formulario_id`~~ resuelto (2026-11-16): el export `fitosanitarios_domisanitarios_rows.json` muestra una fila creada por nuestra API (que no manda `formulario_id`) con el campo ya completo, o sea que Ecodatos lo completa solo (default o trigger); `user_id`/`created_by` quedan en null. El JSON no tiene datos personales y queda ignorado por git (`*_rows.json`).
 - Requisitos, tipos y tasas de consultores y reservas son **provisorios** hasta que cada área confirme.
 - Proceso real de Reservas privadas (distinto al clonado).
 
 ## Pendiente
-- **Pasarela de pagos** (lunes): ver `docs/lunes.md` §7.
+- **Pasarela de pagos**: formulario verificado en sandbox, rutas, conciliación y lote hechos; falta la habilitación del banco y el alta de las URL de aviso. Ver `docs/pasarelas.md`.
 - Pantalla de estadísticas dentro de Ecodatos.
 - Probar todas las pantallas en el navegador y el login real de Ecodatos (no se pudo en la sesión).
 - Ideas del sistema no hechas: sesiones/enlaces activos, reintento de avisos fallidos, vista de la config de cada trámite.

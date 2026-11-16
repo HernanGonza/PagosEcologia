@@ -8,6 +8,7 @@ export interface SolicitudExistente {
   estado: EstadoSolicitud;
   actualizadaEn: string;
 }
+import type { FormularioPago } from '../../lib/enviar-formulario';
 
 const BASE = `${import.meta.env.VITE_API_BASE ?? '/api'}/fitosanitarios`;
 
@@ -34,6 +35,11 @@ async function pedir<T>(ruta: string, opciones: RequestInit = {}, { redirigir = 
     res = await fetch(BASE + ruta, { credentials: 'same-origin', ...opciones, headers });
   } catch {
     throw new ErrorApi(0, 'No pudimos conectarnos. Revisá tu conexión e intentá de nuevo.');
+  }
+  // Cuánto le queda a la sesión: lo escucha el aviso de "sesión por vencer" (components/AvisoSesion).
+  const restante = res.headers.get('X-Sesion-Segundos');
+  if (restante !== null && Number.isFinite(Number(restante))) {
+    window.dispatchEvent(new CustomEvent('sesion-segundos', { detail: { segundos: Number(restante), base: BASE } }));
   }
   const json = await res.json().catch(() => ({}));
   if (json.codigo === 'enlace_invalido' && redirigir) {
@@ -78,6 +84,8 @@ export const api = {
     pedir<SolicitudPublica>(`/solicitud/documentos/${encodeURIComponent(requisito)}/vencimiento`, { ...json({ venceEn }), method: 'PUT' }),
   urlDocumento: (id: number) => `${BASE}/solicitud/documentos/${id}`,
   enviar: () => pedir<SolicitudPublica>('/solicitud/enviar', { method: 'POST' }),
+  /** Crea la orden de pago y devuelve el formulario que el navegador envía al banco. */
+  pagar: () => pedir<{ referencia: string; formulario?: FormularioPago }>('/solicitud/pagar', { method: 'POST' }),
   pagarSimulado: () => pedir<{ ok: true; certificadoId: string; numero: string }>('/solicitud/pagar-simulado', { method: 'POST' }),
   /** Abre el PDF del certificado en otra pestaña (se pide con fetch para que viaje la sesión y el número). */
   abrirCertificado: async () => {
@@ -105,6 +113,8 @@ export const persona = {
   entrar: (email: string, codigo: string) => pedir<{ ok: true }>('/persona/entrar', json({ email, codigo }), sinRedirigir),
   salir: () => pedir<{ ok: true }>('/persona/salir', { method: 'POST' }, sinRedirigir),
   misTitulares: () => pedir<MisTitularesResponse>('/persona/mis-titulares', {}, sinRedirigir),
+  /** Paga varias solicitudes aprobadas con una sola orden (el total lo calcula el servidor). */
+  pagar: (numeros: string[]) => pedir<{ referencia: string; formulario?: FormularioPago }>('/persona/pagar', json({ numeros }), sinRedirigir),
   renovar: (certificados: string[]) => pedir<RenovacionResponse>('/persona/renovar', json({ certificados }), sinRedirigir),
   urlPdf: (certificadoId: string) => `${BASE}/persona/certificados/${certificadoId}/pdf`,
   bajaPropia: (titularId: string) => pedir<{ ok: true }>(`/persona/titulares/${titularId}/baja`, json({}), sinRedirigir),

@@ -5,7 +5,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { createClient, type Session } from '@supabase/supabase-js';
+import { crearSesionEmpleado } from '@botonera/sesion';
 import type { YoPanel } from '@botonera/shared';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -15,12 +15,12 @@ const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const authLocal = import.meta.env.VITE_AUTH_LOCAL === 'true';
 
 export const supabaseConfigurado = authLocal || !!(url && anon);
-const supabase = url && anon ? createClient(url!, anon!, { auth: { storageKey: 'paneles.sesion' } }) : null;
+// Un solo lugar sabe con qué se inicia sesión (packages/sesion): hoy Ecodatos, mañana el login central.
+const sesionEmpleado = crearSesionEmpleado(url, anon);
 
 /** Token vigente (Supabase lo renueva solo). */
 async function tokenActual(): Promise<string | null> {
-  const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
-  return data.session?.access_token ?? null;
+  return sesionEmpleado.token();
 }
 
 /**
@@ -83,13 +83,13 @@ const Contexto = createContext<ContextoSesion | null>(null);
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<Estado>({ tipo: 'cargando' });
 
-  const cargarPermisos = useCallback(async (sesion: Session | null) => {
-    if (!sesion) return setEstado({ tipo: 'sin-sesion' });
+  const cargarPermisos = useCallback(async (haySesion: boolean) => {
+    if (!haySesion) return setEstado({ tipo: 'sin-sesion' });
     try {
       setEstado({ tipo: 'lista', yo: await api<YoPanel>('/paneles/yo') });
     } catch (e) {
       if (e instanceof ErrorApi && e.status === 401) {
-        await supabase?.auth.signOut();
+        await sesionEmpleado.salir();
         return setEstado({ tipo: 'sin-sesion' });
       }
       setEstado({ tipo: 'error', mensaje: (e as Error).message });
@@ -98,28 +98,21 @@ export function SesionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (authLocal) {
-      cargarPermisos({} as Session);
+      cargarPermisos(true);
       return;
     }
-    if (!supabase) return setEstado({ tipo: 'sin-sesion' });
-    supabase.auth.getSession().then(({ data }) => cargarPermisos(data.session));
-    const { data } = supabase.auth.onAuthStateChange((evento, sesion) => {
-      // La renovación del token no cambia los permisos: no hace falta volver a pedirlos.
-      if (evento === 'SIGNED_IN' || evento === 'SIGNED_OUT') cargarPermisos(sesion);
-    });
-    return () => data.subscription.unsubscribe();
+    if (!sesionEmpleado.configurado) return setEstado({ tipo: 'sin-sesion' });
+    sesionEmpleado.haySesion().then(cargarPermisos);
+    // Solo al iniciar o cerrar sesión: renovar el token no cambia los permisos.
+    return sesionEmpleado.alCambiar(cargarPermisos);
   }, [cargarPermisos]);
 
   const entrar = useCallback(async (email: string, clave: string) => {
-    if (!supabase) throw new Error('Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-    const { error } = await supabase.auth.signInWithPassword({ email, password: clave });
-    if (error) {
-      throw new Error(/invalid login credentials/i.test(error.message) ? 'El mail o la contraseña no son correctos.' : error.message);
-    }
+    await sesionEmpleado.ingresar(email, clave);
   }, []);
 
   const salir = useCallback(async () => {
-    await supabase?.auth.signOut();
+    await sesionEmpleado.salir();
     setEstado({ tipo: 'sin-sesion' });
   }, []);
 

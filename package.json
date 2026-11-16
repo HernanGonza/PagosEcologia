@@ -19,6 +19,10 @@
     "dev:paneles": "node scripts/dev.mjs paneles",
     "dev:sistema": "node scripts/dev.mjs sistema",
     "dev": "node scripts/dev.mjs",
-    "db:local": "node scripts/db-local.mjs"
+    "db:local": "node scripts/db-local.mjs",
+    "pagos:conciliar": "npm run pagos:conciliar -w @botonera/api"
+  },
+  "dependencies": {
+    "clickdepago-mcp-server": "^1.0.0"
   }
 }

@@ -82,7 +82,11 @@ function AvisoEnlace() {
   if (motivo === 'vencido') {
     return (
       <div className="mt-8">
-        <Aviso>Tu sesión venció o el enlace ya no vale (se usa una sola vez, vence y lo reemplaza uno más nuevo). Pedí uno nuevo con tu mail acá abajo.</Aviso>
+        <Aviso>
+          <strong className="block font-medium">Tu sesión se cerró</strong>
+          La sesión se cierra sola después de unos 30 minutos sin actividad, o a las 4 horas de haber entrado. Lo que ya guardaste sigue ahí.
+          Para continuar, ingresá tu mail acá abajo: te mandamos un código y un enlace nuevo. Pasa lo mismo si el enlace del mail ya se usó o lo reemplazó uno más nuevo.
+        </Aviso>
       </div>
     );
   }

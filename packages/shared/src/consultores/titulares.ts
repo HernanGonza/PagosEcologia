@@ -86,7 +86,7 @@ export interface TitularFicha extends Omit<TitularResumen, 'objetos' | 'vigentes
   creadoEn: string;
   objetos: ObjetoVista[];
   vinculos: VinculoVista[];
-  solicitudes: { id: string; numero: string; tipo: string; tipoSolicitud: 'alta' | 'renovacion'; estado: string; enviadaEn: string | null }[];
+  solicitudes: { id: string; numero: string; tipo: string; tipoSolicitud: 'alta' | 'renovacion'; estado: string; enviadaEn: string | null; /** Tasa a pagar: solo en las aprobadas, en el tablero de la persona. */ importeCentavos?: number | null }[];
 }
 
 export interface TitularesResponse {

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import AvisoPublico from './AvisoPublico';
+import AvisoCookies from './AvisoCookies';
+import AvisoSesion from './AvisoSesion';
 import logo from '@botonera/marca/logos/ecologia-misiones-horizontal.svg';
 import logoBlanco from '@botonera/marca/logos/ecologia-misiones-horizontal-blanco.svg';
 
@@ -9,6 +11,7 @@ export default function Marco({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col bg-crema font-marca text-foreground">
       <AvisoPublico />
+      <AvisoCookies />
       <header className="border-b border-border bg-white print:hidden">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <Link to="/" aria-label="Inicio: pagos y trámites">
@@ -22,6 +25,7 @@ export default function Marco({ children }: { children: ReactNode }) {
       </header>
 
       <div className="flex-1">{children}</div>
+      <AvisoSesion />
 
       <footer className="bg-verde-800 text-white/80 print:hidden">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -31,6 +35,11 @@ export default function Marco({ children }: { children: ReactNode }) {
             <a href="https://ecologia.misiones.gob.ar" className="text-rosa-300 hover:underline">
               ecologia.misiones.gob.ar
             </a>
+            <div>
+              <Link to="/cookies" className="text-white/80 underline underline-offset-2 hover:text-white">
+                Cookies y sesión
+              </Link>
+            </div>
           </div>
         </div>
       </footer>

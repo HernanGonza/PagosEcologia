@@ -4,6 +4,8 @@ import { modulosRouter } from './routes/modulos.js';
 import { adminRouter } from './routes/admin.js';
 import { panelesRouter } from './routes/paneles.js';
 import { sistemaRouter } from './routes/sistema.js';
+import { pagosRouter } from './routes/pagos.js';
+import { exigirCuentasDePago } from './core/pagos-online.js';
 import { fitosanitariosRouter } from './modules/fitosanitarios/index.js';
 import { consultoresRouter } from './modules/consultores/index.js';
 import { reservasRouter } from './modules/reservas/index.js';
@@ -27,6 +29,7 @@ if (process.env.NODE_ENV === 'production') {
   if (process.env.PAYMENT_PROVIDER !== 'macroclick') throw new Error('En producción PAYMENT_PROVIDER debe ser macroclick: el proveedor mock acepta cualquier webhook.');
   if (!(process.env.CORS_ORIGINS ?? process.env.WEB_URL)?.trim()) throw new Error('Falta WEB_URL (o CORS_ORIGINS) en el .env: orígenes permitidos para la API.');
 }
+exigirCuentasDePago();
 await exigirMigraciones();
 
 const app = express();
@@ -48,6 +51,8 @@ app.use('/api/modulos', modulosRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/paneles', panelesRouter);
 app.use('/api/sistema', sistemaRouter);
+// El aviso del banco tiene que llegar aunque el sitio esté en mantenimiento o el módulo apagado: no pasa por moduloActivo.
+app.use('/api/pagos', pagosRouter);
 app.use('/api/fitosanitarios', moduloActivo('fitosanitarios'), fitosanitariosRouter);
 app.use('/api/consultores', moduloActivo('consultores'), consultoresRouter);
 app.use('/api/reservas', moduloActivo('reservas'), reservasRouter);

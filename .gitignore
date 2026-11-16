@@ -13,3 +13,9 @@ apps/relevamiento/data/
 
 # Base local de pruebas (npm run db:local) y archivos del storage local
 /.local/
+
+# Config local del MCP de Click de Pago: lleva credenciales (copiar de .mcp.json.example)
+.mcp.json
+
+# Exportaciones de tablas de Ecodatos (solo para mirar la estructura)
+*_rows.json

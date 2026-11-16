@@ -12,7 +12,7 @@ import {
   type TramiteAdmin,
 } from '@botonera/shared';
 import { pool } from '../db.js';
-import { requiereRecaudaciones } from '../core/auth-ecodatos.js';
+import { puedeEditarRecaudaciones, requiereEdicionRecaudaciones, requiereRecaudaciones } from '../core/auth-ecodatos.js';
 
 export const adminRouter = Router();
 
@@ -23,7 +23,7 @@ adminRouter.use(requiereRecaudaciones);
 
 adminRouter.get('/yo', (req, res) => {
   const { id, email, nombre } = req.sesionPanel!.usuario;
-  res.json({ id, email, nombre });
+  res.json({ id, email, nombre, puedeEditar: puedeEditarRecaudaciones(req.sesionPanel!) });
 });
 
 /** Fecha de hoy en Argentina, YYYY-MM-DD. */
@@ -308,7 +308,7 @@ adminRouter.get('/auditoria', async (_req, res, next) => {
  * Solo importes fijos (en pesos, se guardan en centavos); las escalas se cargan por migración.
  * Queda en la auditoría con el valor anterior. Como todo `/api/admin`, no responde hasta que haya login.
  */
-adminRouter.post('/tarifas', async (req, res, next) => {
+adminRouter.post('/tarifas', requiereEdicionRecaudaciones, async (req, res, next) => {
   try {
     const moduloSlug = String(req.body?.moduloSlug ?? '');
     const concepto = String(req.body?.concepto ?? '');

@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FloatingInput } from '@/components/watermelon/floating-input';
 import { cn } from '@/lib/utils';
-import { api, ErrorApi, fecha, persona } from './api';
+import BotonPagar from '@/components/BotonPagar';
+import { api, ErrorApi, fecha, persona, pesos } from './api';
 import { Aviso, Pagina, Tarjeta } from './comunes';
 import { reservas as c } from '@botonera/shared';
 const { etiquetasEstado } = c;
@@ -165,7 +166,7 @@ function FilaObjeto({ o, elegido, alternar }: { o: ObjetoVista; elegido: boolean
   );
 }
 
-function TarjetaTitular({ t, elegidos, alternar, recargar }: { t: Titular; elegidos: Set<string>; alternar: (id: string) => void; recargar: () => void }) {
+function TarjetaTitular({ t, elegidos, alternar, aPagar, alternarPago, recargar }: { t: Titular; elegidos: Set<string>; alternar: (id: string) => void; aPagar: Set<string>; alternarPago: (numero: string) => void; recargar: () => void }) {
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
   async function bajaPropia() {
@@ -208,10 +209,20 @@ function TarjetaTitular({ t, elegidos, alternar, recargar }: { t: Titular; elegi
           <h3 className="mb-2 text-sm font-medium text-verde-700">Mis solicitudes</h3>
           <ul className="flex flex-col gap-1.5 text-sm">
             {t.misSolicitudes.map((s) => (
-              <li key={s.id}>
+              <li key={s.id} className="flex items-center gap-2">
+                {s.estado === 'aprobada' && !!s.importeCentavos && (
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-verde-700"
+                    checked={aPagar.has(s.numero)}
+                    onChange={() => alternarPago(s.numero)}
+                    aria-label={`Pagar la solicitud ${s.numero}`}
+                  />
+                )}
                 <Link to={`/pagar/reservas/solicitud?n=${s.numero}`} className="inline-flex items-center gap-1 text-verde-700 hover:underline">
                   {s.numero} · {s.tipoSolicitud === 'renovacion' ? 'Renovación' : 'Alta'} · {etiquetasEstado[s.estado as keyof typeof etiquetasEstado] ?? s.estado} <ArrowRight className="size-3.5" />
                 </Link>
+                {s.estado === 'aprobada' && !!s.importeCentavos && <span className="text-muted-foreground">· tasa {pesos(s.importeCentavos)}</span>}
               </li>
             ))}
           </ul>
@@ -244,6 +255,7 @@ export default function MisCertificados() {
   const [datos, setDatos] = useState<MisTitularesResponse | null>(null);
   const [cargando, setCargando] = useState(true);
   const [elegidos, setElegidos] = useState<Set<string>>(new Set());
+  const [aPagar, setAPagar] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [renovando, setRenovando] = useState(false);
   const [creadas, setCreadas] = useState<{ numero: string }[]>([]);
@@ -261,6 +273,15 @@ export default function MisCertificados() {
     void cargar();
   }, [cargar]);
 
+  const alternarPago = (numero: string) =>
+    setAPagar((previo) => {
+      const nuevo = new Set(previo);
+      if (!nuevo.delete(numero)) nuevo.add(numero);
+      return nuevo;
+    });
+  // Solo cuentan las que siguen aprobadas en lo último que trajo el servidor; el total final lo vuelve a calcular el servidor.
+  const solicitudesAPagar = (datos?.titulares ?? []).flatMap((x) => x.misSolicitudes).filter((s) => aPagar.has(s.numero) && s.estado === 'aprobada' && !!s.importeCentavos);
+  const totalAPagar = solicitudesAPagar.reduce((a, s) => a + (s.importeCentavos ?? 0), 0);
   const alternar = (id: string) =>
     setElegidos((previo) => {
       const nuevo = new Set(previo);
@@ -330,7 +351,7 @@ export default function MisCertificados() {
           )}
 
           {datos.titulares.map((t) => (
-            <TarjetaTitular key={t.id} t={t} elegidos={elegidos} alternar={alternar} recargar={() => void cargar()} />
+            <TarjetaTitular key={t.id} t={t} elegidos={elegidos} alternar={alternar} aPagar={aPagar} alternarPago={alternarPago} recargar={() => void cargar()} />
           ))}
 
           {datos.solicitudesSinTitular.length > 0 && (
@@ -350,8 +371,17 @@ export default function MisCertificados() {
 
           {error && <Aviso>{error}</Aviso>}
 
+          <div className="sticky bottom-4 z-10 flex flex-col gap-2 empty:hidden">
+          {solicitudesAPagar.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verde-500 bg-white p-4 shadow-lg">
+              <p className="text-sm">
+                <strong>{solicitudesAPagar.length}</strong> {solicitudesAPagar.length === 1 ? 'solicitud elegida' : 'solicitudes elegidas'} para pagar. Total: <strong className="text-verde-700">{pesos(totalAPagar)}</strong> (las tasas se suman en un solo pago).
+              </p>
+              <BotonPagar iniciar={() => persona.pagar(solicitudesAPagar.map((s) => s.numero))} texto="Pagar lo elegido" />
+            </div>
+          )}
           {elegidos.size > 0 && (
-            <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verde-500 bg-white p-4 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-verde-500 bg-white p-4 shadow-lg">
               <p className="text-sm">
                 <strong>{elegidos.size}</strong> {elegidos.size === 1 ? 'certificado elegido' : 'certificados elegidos'}. La tasa se paga al aprobarse; los importes se suman.
               </p>
@@ -360,6 +390,7 @@ export default function MisCertificados() {
               </Button>
             </div>
           )}
+          </div>
         </div>
       )}
     </Pagina>

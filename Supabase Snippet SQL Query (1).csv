@@ -1,0 +1,18 @@
+archivo,aplicada_en
+0001_pagos_base.sql,2026-10-27 11:17:52.415271+00
+0002_fitosanitarios.sql,2026-10-27 11:17:52.742472+00
+0003_rol_botonera.sql,2026-10-27 11:17:52.771289+00
+0004_config_fitosanitarios.sql,2026-10-27 11:45:19.081856+00
+0005_solicitudes_fitosanitarios.sql,2026-10-27 14:32:55.872662+00
+0006_permisos_ecodatos.sql,2026-10-27 14:32:56.16465+00
+0007_revision_trazabilidad.sql,2026-10-27 14:45:30.077694+00
+0008_tipo_fraccionamiento.sql,2026-11-02 09:55:33.666677+00
+0009_enlaces_y_sesiones.sql,2026-11-02 09:55:33.666677+00
+0010_ecodatos_registro.sql,2026-11-02 09:55:33.666677+00
+0011_titulares_y_renovaciones.sql,2026-11-02 09:55:33.666677+00
+0012_consultores.sql,2026-11-02 09:55:33.666677+00
+0013_consultores_registro.sql,2026-11-02 09:55:33.666677+00
+0014_reservas.sql,2026-11-02 09:55:33.666677+00
+0015_reservas_registro.sql,2026-11-02 09:55:33.666677+00
+0016_recaudaciones.sql,2026-11-02 09:55:33.666677+00
+0017_sistema_config.sql,2026-11-02 09:55:33.666677+00

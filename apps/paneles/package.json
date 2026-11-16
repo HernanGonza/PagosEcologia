@@ -9,11 +9,11 @@
   },
   "dependencies": {
     "@botonera/marca": "*",
+    "@botonera/sesion": "*",
     "@botonera/shared": "*",
     "@radix-ui/react-avatar": "^1.3.1",
     "@radix-ui/react-label": "^2.1.2",
     "@radix-ui/react-slot": "^1.5.0",
-    "@supabase/supabase-js": "^2.45.4",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "lucide-react": "^0.460.0",

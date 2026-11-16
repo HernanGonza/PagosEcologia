@@ -31,7 +31,7 @@ typecheck de la API, y en local el circuito aprobada → pago simulado → certi
 ## Pasos en el server (VM de ecodatos)
 1. Clonar el repo y crear `.env` a partir de `.env.ecodatos.example` (DB, Supabase, `VERIFICACION_SECRETO`, etc.).
    Tiene que traer `COMPOSE_FILE=docker-compose.yml:docker-compose.prueba.yml:docker-compose.ecodatos.yml`.
-2. Migraciones: `select count(*) from pagos._migraciones;` debe dar 17 (ver `docs/lunes.md`). Sin las 17 la API no arranca.
+2. Migraciones: `select count(*) from pagos._migraciones;` debe dar 18 (ver `docs/lunes.md`). Sin las 18 la API no arranca.
 3. `docker compose up -d --build`
 4. Pegar `docker/ecodatos-nginx-pagos.conf` dentro del `server { }` de `ecodatos/infra/nginx/nginx.conf` (junto a wiki y claves)
    y recargar: `docker exec app-formularios-nginx nginx -t && docker exec app-formularios-nginx nginx -s reload`.
@@ -41,7 +41,16 @@ typecheck de la API, y en local el circuito aprobada → pago simulado → certi
    `/pagos/tecnicos/`, `/pagos/recaudaciones/` y `/pagos/administracion/` con usuarios reales de Ecodatos.
 6. Verificar `TRUST_PROXY`: la cadena es HAProxy → nginx de ecodatos → nginx de pagos → API (por defecto `3`). Si la IP que ve
    la API es la de un proxy (o se puede falsear `X-Forwarded-For`), corregir. Ver `mails-y-seguridad.md` del módulo de fitosanitarios.
-7. Cron diario en el host: `docker compose exec -T api npm run fitosanitarios:tareas` (idem `consultores:tareas`, `reservas:tareas`).
+7. Cron diario en el host: `docker compose exec -T api npm run fitosanitarios:tareas` (idem `consultores:tareas`, `reservas:tareas`) y, con la pasarela real, `docker compose exec -T api npm run pagos:conciliar` (sale con código 1 si el banco no responde).
+
+## Verificar TRUST_PROXY (medido el 2026-11-16: está mal)
+Síntomas vistos en el server: desde el navegador la IP guardada es siempre `10.0.0.20` (el gateway) y con `curl -H "X-Forwarded-For: 9.9.9.9"` la API guarda `9.9.9.9`.
+Significa dos cosas: (1) el gateway **no le pasa al resto la IP real del cliente** (la oculta o no agrega `X-Forwarded-For`), y (2) `TRUST_PROXY=3` es **más alto** que los proxies reales, así que la API cree lo que escribe el cliente.
+Consecuencias: todos los contribuyentes comparten un mismo tope por IP (uno solo puede bloquear a los demás) y un atacante lo esquiva falsificando el encabezado.
+Cómo ajustarlo: abrir **Estado del sistema** (administración) desde el navegador: muestra `TRUST_PROXY`, "tu IP según la API", la conexión directa y el `X-Forwarded-For` que llegó.
+- Cuenta las IPs de `X-Forwarded-For` + la conexión directa: son los saltos reales hasta tu navegador. `TRUST_PROXY` = cantidad de proxies **de confianza** (los del ministerio), sin contar al cliente.
+- Si en esa lista **no aparece tu IP real**, el problema está en el gateway (HAProxy: `option forwardfor`; o está haciendo NAT y reemplaza el origen): hay que arreglarlo ahí, no se puede resolver desde la API.
+- Tu IP real tiene que ser el valor de "Tu IP según la API", y con el `curl` falsificado no puede salir `9.9.9.9`.
 
 ## Pago simulado (para la demostración)
 En `/pagos/publico/`, una solicitud **aprobada** muestra «Pagar la tasa (simulado)». Al apretarlo: pasa a pagada, se emite el
@@ -76,6 +85,6 @@ para borrar de verdad se cambia la última línea a `commit;`. Es una sola trans
   verificación y enlaces de acceso de todos los mails** (o sea, entrar a cualquier solicitud). Solo datos de prueba; usar
   `MAIL_PANEL_CLAVE` si el dominio es accesible desde internet. CORS queda abierto. Estado del sistema no avisa en este modo.
 - Los certificados del modo prueba son reales en la base de Ecodatos: usar datos ficticios y limpiarlos después.
-- **Producción real** exige `PAYMENT_PROVIDER=macroclick` (`core/payments/macroclick.ts` está vacío, ver `docs/pasarelas.md`),
+- **Producción real** exige `PAYMENT_PROVIDER=macroclick` con la cuenta de cada módulo completa en el `.env` (la API **no arranca** si falta algún dato: ver `docs/pasarelas.md`),
   mail real (`GMAIL_*` o `MS_*`) y levantar sin `docker-compose.prueba.yml`.
 - Si se sirve por HTTP las cookies van sin `Secure`; con el dominio por HTTPS, `WEB_URL=https://…` las marca `Secure`/`__Host-`.

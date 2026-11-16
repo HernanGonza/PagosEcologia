@@ -148,14 +148,17 @@ sistemaRouter.put('/config/aviso', async (req, res, next) => {
 // --- Estado del sistema ---------------------------------------------------------------------------------
 
 /** Salud y configuración. Solo indica si cada cosa está configurada: nunca devuelve claves ni contraseñas. */
-sistemaRouter.get('/estado', async (_req, res, next) => {
+sistemaRouter.get('/estado', async (req, res, next) => {
   try {
     const t0 = Date.now();
-    const [migraciones, tamanio, ordenes, verificaciones] = await Promise.all([
+    const [migraciones, tamanio, ordenes, verificaciones, conciliacion, aRevisar] = await Promise.all([
       estadoMigraciones(),
       pool.query<{ bytes: string }>('select pg_database_size(current_database())::text as bytes'),
       pool.query<{ pendientes: number }>("select count(*)::int as pendientes from pagos.ordenes_pago where estado = 'pendiente'"),
       pool.query<{ n: number }>("select count(*)::int as n from pagos.verificaciones_email where created_at > now() - interval '24 hours'"),
+      pool.query<{ created_at: Date; despues: { bancoNoResponde?: boolean; errores?: number } }>("select created_at, despues from pagos.auditoria where accion = 'conciliacion' order by id desc limit 1"),
+      // Cobradas por el banco pero cuya solicitud no se pudo completar: hay que resolverlas a mano.
+      pool.query<{ n: number }>("select count(*)::int as n from pagos.ordenes_pago where estado = 'pagada' and datos->>'requiere_revision' = 'true'"),
     ]);
     const baseMs = Date.now() - t0;
     const produccion = process.env.NODE_ENV === 'production';
@@ -175,6 +178,13 @@ sistemaRouter.get('/estado', async (_req, res, next) => {
     if (produccion && entorno.emisionSimulada) alertas.push('EMISION_SIMULADA está activa en producción: se podrían emitir certificados sin pagar.');
     if (produccion && entorno.loginLocal) alertas.push('AUTH_LOCAL está activo en producción.');
     if (produccion && entorno.proveedorPago !== 'macroclick') alertas.push('El proveedor de pago no es macroclick.');
+    // Pagos reales: la conciliación diaria tiene que correr y el banco tiene que contestarle.
+    const ultima = conciliacion.rows[0];
+    if (produccion && entorno.proveedorPago === 'macroclick') {
+      if (!ultima || Date.now() - ultima.created_at.getTime() > 36 * 3600 * 1000) alertas.push('La conciliación de pagos no corrió en las últimas 36 horas (npm run pagos:conciliar, una vez por día).');
+      else if (ultima.despues?.bancoNoResponde) alertas.push('La última conciliación no pudo consultar al banco: los pagos con aviso perdido no se recuperan hasta que responda.');
+    }
+    if (aRevisar.rows[0].n > 0) alertas.push(`${aRevisar.rows[0].n} pago(s) cobrados cuya solicitud no se pudo completar: revisar las órdenes con requiere_revision y resolverlas a mano.`);
     res.json({
       ahora: new Date().toISOString(),
       nodo: process.version,
@@ -182,8 +192,16 @@ sistemaRouter.get('/estado', async (_req, res, next) => {
       baseBytes: Number(tamanio.rows[0].bytes),
       migraciones,
       ordenesPendientes: ordenes.rows[0].pendientes,
+      ultimaConciliacion: ultima ? { en: ultima.created_at.toISOString(), ...ultima.despues } : null,
       codigosUltimas24h: verificaciones.rows[0].n,
       entorno,
+      // Diagnóstico de proxies: qué ve la API de ESTE pedido. Sirve para ajustar TRUST_PROXY (ver docs/despliegue-docker.md).
+      conexion: {
+        trustProxy: process.env.TRUST_PROXY?.trim() || '(sin definir)',
+        ipQueUsaLaApi: req.ip ?? null,
+        conexionDirecta: req.socket.remoteAddress ?? null,
+        xForwardedFor: req.get('x-forwarded-for') ?? null,
+      },
       alertas,
     });
   } catch (e) {
